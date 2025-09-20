@@ -4,18 +4,16 @@ from dataclasses import Field
 from datetime import datetime
 from typing import List, Optional
 
+import adk
+import psycopg2
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
-import psycopg2
 from psycopg2.extras import RealDictCursor
-
-from . import adk
-
+from pydantic import BaseModel
 
 # Load environment variables from .env file
 load_dotenv()
@@ -76,6 +74,7 @@ class AddNodeRequest(BaseModel):
     num_nodes: int
     edge_in_month: int
     type: str
+    agent_type: Optional[str]
 
 
 class AddPersonalInformationRequest(BaseModel):
@@ -91,9 +90,7 @@ class UpdatePersonalInformationRequest(BaseModel):
 @app.get("/adk/events/{user_id}")
 async def adk_events_endpoint(user_id: str, is_audio: str = "false"):
     """SSE endpoint for agent-to-client communication."""
-    live_events, live_request_queue = await adk.start_agent_session(
-        user_id, is_audio == "true"
-    )
+    live_events, live_request_queue = await adk.start_agent_session(user_id, is_audio == "true")
 
     def cleanup():
         live_request_queue.close()
@@ -141,13 +138,31 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
 # Generate a Node with ADK, Insert to database, and return the node
 @app.post("/api/add-node")
 async def add_node(request: AddNodeRequest):
-    # Example of how to use the database connection
-    # conn = get_db_connection()
-    # with conn.cursor() as cur:
-    #     cur.execute("INSERT INTO nodes ...")
-    #     conn.commit()
-    # conn.close()
-    return {"message": "Node added successfully (placeholder)"}
+    try:
+        # Create a prompt for node generation based on the root node and parameters
+        prompt = f"""
+        Generate {request.num_nodes} life path decisions/scenarios based on this root node:
+        
+        Root Node: {request.root.name}
+        Description: {request.root.description or "No description provided"}
+        Type: {request.type}
+        Time frame: {request.edge_in_month} months
+        
+        Generate realistic life path options that branch from this point, considering the time frame and type specified.
+        Each option should be a distinct choice or scenario that could realistically happen.
+        """
+
+        # Use the new one-time session to generate nodes without chat history
+        generated_response = await adk.generate_node_response(prompt, request.agent_type)
+
+        # TODO: Parse the response and create actual nodes
+        # TODO: Insert nodes into database
+        # TODO: Return structured node data
+
+        return {"message": "Node generation completed", "generated_content": generated_response, "root_node": request.root.dict(), "parameters": {"num_nodes": request.num_nodes, "edge_in_month": request.edge_in_month, "type": request.type}}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")
 
 
 # Add user information gathered on interview screen to database
@@ -183,3 +198,14 @@ async def get_nodes(user_id: str):
 async def get_links(user_id: str):
     # get all links for user
     return {"message": f"Links for user {user_id} (placeholder)"}
+
+
+# Get available AI agents
+@app.get("/api/agents")
+async def get_available_agents():
+    """Get a list of all available AI agents."""
+    try:
+        agents = adk.get_available_agents()
+        return {"agents": agents, "default": "interviewer_agent", "total": len(agents)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get agents: {str(e)}")
