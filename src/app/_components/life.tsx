@@ -1,12 +1,16 @@
 "use client";
 
 import type { User } from "next-auth";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph from "react-force-graph-3d";
 import SpriteText from "three-spritetext";
+import { getHighlightPath } from "./highlight";
+import * as THREE from "three";
+import { createCollapsibleGraph } from "./pruned";
 
 export default function Life({ user: _user }: { user: User }) {
   const [isMounted, setIsMounted] = useState(false);
+  const fgRef = useRef<any>({});
   const nodes = [
     { id: "Now", x: 0, y: 0, z: 0, color: "red", fx: 0, fy: 0, fz: 0 },
     { id: "College Graduate", x: 1, y: 1, z: 1, color: "blue" },
@@ -191,6 +195,15 @@ export default function Life({ user: _user }: { user: User }) {
     { source: "Retired Early", target: "Retired" },
   ];
 
+  const highlightRef = useRef<string[]>([]);
+  const hoverRef = useRef<string>("");
+  const graphManager = useMemo(
+    () => createCollapsibleGraph(nodes, links, "Now"),
+    [],
+  );
+
+  const [graphData, setGraphData] = useState(graphManager.getPrunedGraph());
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -201,14 +214,77 @@ export default function Life({ user: _user }: { user: User }) {
 
   return (
     <ForceGraph
-      graphData={{ nodes, links }}
-      nodeThreeObjectExtend={true}
+      ref={fgRef}
+      graphData={graphData}
+      onNodeClick={(node: any) => {
+        if (!node.childLinks || node.childLinks.length === 0) return;
+        graphManager.toggleNode(node.id);
+        setGraphData(graphManager.getPrunedGraph());
+        fgRef.current.d3Force("charge").strength(-200);
+
+        fgRef.current.d3Force("link").distance(60);
+      }}
+      nodeThreeObjectExtend={false}
       nodeThreeObject={(node: any) => {
+        const group = new THREE.Group();
+        const color =
+          !node.childLinks || node.childLinks.length === 0
+            ? "green"
+            : node.collapsed
+              ? "red"
+              : "yellow";
+
+        // === Base size from nodeVal logic ===
+        const radius = node.id === "Now" ? 10 : 4;
+
+        // === Node body ===
+        const geometry = new THREE.SphereGeometry(radius, 32, 32);
+        const material = new THREE.MeshStandardMaterial({
+          color: color,
+          roughness: 0.4,
+          metalness: 0.6,
+        });
+        const sphere = new THREE.Mesh(geometry, material);
+        group.add(sphere);
+
+        // === Highlight effect (hover or special node) ===
+        if (highlightRef.current.includes(node.id)) {
+          // --- Glow ---
+          const glowGeometry = new THREE.SphereGeometry(radius * 2, 32, 32);
+          const glowMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: node.id == hoverRef.current ? 1 : 0.25,
+          });
+          const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+          group.add(glow);
+
+          // --- Ring ---
+          const ringGeometry = new THREE.TorusGeometry(
+            radius * 2.2,
+            radius * 0.2,
+            16,
+            100,
+          );
+          const ringMaterial = new THREE.MeshBasicMaterial({
+            color: "white",
+            transparent: true,
+            opacity: 0.8,
+          });
+          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+          ring.rotation.x = Math.PI / 2; // lay flat
+          group.add(ring);
+        }
+
+        // === Label ===
         const sprite = new SpriteText(node.id);
-        sprite.color = node.color;
-        sprite.textHeight = node.id === "Now" ? 10 : 8;
-        sprite.center.y = -0.6; // shift above node
-        return sprite;
+        sprite.color = "white";
+        sprite.textHeight = radius * 1.5;
+        sprite.center.set(0.5, 0);
+        sprite.position.set(0, radius * 2.2, 0);
+        group.add(sprite);
+
+        return group;
       }}
       nodeVal={(node) => (node.id === "Now" ? 50 : 4)}
       d3AlphaDecay={0.01}
@@ -225,6 +301,24 @@ export default function Life({ user: _user }: { user: User }) {
         // Allow dragging for all other nodes
         return true;
       }}
+      onNodeHover={(node: any) => {
+        if (!node && hoverRef.current) {
+          hoverRef.current = "";
+        } else if (node && !hoverRef.current) {
+          hoverRef.current = node.id;
+          highlightRef.current = getHighlightPath(node.id, graphData.links);
+          console.log("NODE HIGHLIGHT: ", highlightRef.current);
+
+          // refresh the graph canvas only, no React re-render
+          fgRef.current?.refresh();
+        }
+      }}
+      linkWidth={(link) =>
+        highlightRef.current.includes(link.source.id) &&
+        highlightRef.current.includes(link.target.id)
+          ? 4
+          : 0
+      }
       onNodeDragEnd={(node) => {
         // Keep "Now" fixed, but allow other nodes to be positioned
         if (node.id === "Now") {
@@ -246,16 +340,6 @@ export default function Life({ user: _user }: { user: User }) {
           nowNode.fx = 0;
           nowNode.fy = 0;
           nowNode.fz = 0;
-        }
-      }}
-      nodeCanvasObject={(node: any, ctx: any, globalScale: any) => {
-        // Optional: Add a special ring around "Now" node
-        if (node.id === "Now") {
-          const size = 20 * globalScale;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, size * 1.5, 0, 2 * Math.PI, false);
-          ctx.fillStyle = "rgba(255, 215, 0, 0.3)"; // Gold glow
-          ctx.fill();
         }
       }}
     />
