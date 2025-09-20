@@ -149,12 +149,8 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
         data = message["data"]
 
         session_info = adk.send_message_to_agent(user_id, mime_type, data)
-        
-        return {
-            "status": "sent",
-            "message_count": session_info["message_count"],
-            "should_check_completeness": session_info["should_check_completeness"]
-        }
+
+        return {"status": "sent", "message_count": session_info["message_count"], "should_check_completeness": session_info["should_check_completeness"]}
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -165,12 +161,7 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
 @app.get("/adk/session-status/{user_id}")
 async def get_session_status(user_id: str):
     """Check if a session exists for a user (for debugging)."""
-    return {
-        "user_id": user_id,
-        "session_exists": user_id in adk.active_sessions,
-        "active_sessions": list(adk.active_sessions.keys()),
-        "total_sessions": len(adk.active_sessions)
-    }
+    return {"user_id": user_id, "session_exists": user_id in adk.active_sessions, "active_sessions": list(adk.active_sessions.keys()), "total_sessions": len(adk.active_sessions)}
 
 
 @app.delete("/adk/session/{user_id}")
@@ -191,17 +182,14 @@ async def check_interview_completeness_endpoint(user_id: str, request: Request):
     try:
         body = await request.json()
         conversation_history = body.get("conversation_history", "")
-        
+
         if not conversation_history:
             raise HTTPException(status_code=400, detail="Conversation history is required")
-        
+
         completeness_result = await adk.check_interview_completeness(user_id, conversation_history)
-        
-        return {
-            "status": "checked",
-            **completeness_result
-        }
-    
+
+        return {"status": "checked", **completeness_result}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -346,3 +334,96 @@ async def instantiate_user_node(user_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to instantiate user node: {str(e)}")
+
+
+# Delete a node and cascade delete unreachable nodes
+@app.delete("/api/delete-node/{user_id}/{node_id}")
+async def delete_node(user_id: str, node_id: str):
+    """Delete a node and all nodes that become unreachable from 'Now'."""
+    try:
+        with db.cursor(cursor_factory=RealDictCursor) as cursor:
+            # First, check if the node exists and belongs to the user
+            cursor.execute(
+                """
+                SELECT id FROM "stem-connect_node" 
+                WHERE id = %s AND "userId" = %s
+            """,
+                (node_id, user_id),
+            )
+
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail=f"Node {node_id} not found for user {user_id}")
+
+            # Don't allow deletion of the root "Now" node
+            if node_id == "Now":
+                raise HTTPException(status_code=400, detail="Cannot delete the root 'Now' node")
+
+            # Get all nodes and links for the user
+            cursor.execute(
+                """
+                SELECT id FROM "stem-connect_node" WHERE "userId" = %s
+            """,
+                (user_id,),
+            )
+            all_nodes = {row["id"] for row in cursor.fetchall()}
+
+            cursor.execute(
+                """
+                SELECT source, target FROM "stem-connect_link" WHERE "userId" = %s
+            """,
+                (user_id,),
+            )
+            all_links = [(row["source"], row["target"]) for row in cursor.fetchall()]
+
+            # Find all nodes reachable from "Now" after removing the target node
+            reachable_nodes = set()
+
+            def dfs_from_now(current_node):
+                if current_node in reachable_nodes or current_node == node_id:
+                    return
+                reachable_nodes.add(current_node)
+
+                # Follow all outgoing links from this node
+                for source, target in all_links:
+                    if source == current_node and target != node_id:
+                        dfs_from_now(target)
+
+            # Start DFS from "Now" node
+            if "Now" in all_nodes:
+                dfs_from_now("Now")
+
+            # Find nodes that will become unreachable
+            unreachable_nodes = all_nodes - reachable_nodes
+            # Remove the target node from unreachable (it's being explicitly deleted)
+            unreachable_nodes.discard(node_id)
+            nodes_to_delete = {node_id} | unreachable_nodes
+
+            print(f"Deleting node {node_id} and {len(unreachable_nodes)} unreachable nodes: {unreachable_nodes}")
+
+            # Delete all links involving any of the nodes to be deleted
+            for node in nodes_to_delete:
+                cursor.execute(
+                    """
+                    DELETE FROM "stem-connect_link" 
+                    WHERE ("userId" = %s) AND (source = %s OR target = %s)
+                """,
+                    (user_id, node, node),
+                )
+
+            # Delete all the nodes
+            for node in nodes_to_delete:
+                cursor.execute(
+                    """
+                    DELETE FROM "stem-connect_node" 
+                    WHERE id = %s AND "userId" = %s
+                """,
+                    (node, user_id),
+                )
+
+            db.commit()
+
+            return {"deleted_node": node_id, "cascade_deleted": list(unreachable_nodes), "total_deleted": len(nodes_to_delete), "remaining_nodes": len(all_nodes) - len(nodes_to_delete)}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete node: {str(e)}")

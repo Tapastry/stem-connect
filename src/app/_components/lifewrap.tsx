@@ -154,6 +154,73 @@ const onNodeClick = async (
   }
 };
 
+const onNodeDelete = async (
+  nodeId: string,
+  user: User,
+  setNodes: (nodes: Node[]) => void,
+  setLinks: (links: Link[]) => void,
+) => {
+  console.log("DELETING NODE", nodeId);
+
+  try {
+    const response = await fetch(
+      `http://localhost:8000/api/delete-node/${user.id}/${nodeId}`,
+      {
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok) {
+      console.error("Delete request failed:", response.status);
+      const errorData = await response.text();
+      console.error("Error details:", errorData);
+      return;
+    }
+
+    const deleteResult = await response.json();
+    console.log("Delete result:", deleteResult);
+
+    // Reload the graph data to reflect the deletions
+    const graphResponse = await fetch(
+      `http://localhost:8000/api/get-graph/${user.id}`,
+    );
+
+    if (graphResponse.ok) {
+      const graphData = await graphResponse.json();
+
+      // Convert database nodes to frontend format
+      const frontendNodes: Node[] = graphData.nodes.map((dbNode: any) => ({
+        id: dbNode.id,
+        x: Math.random() * 10 - 5, // Random positioning for now
+        y: Math.random() * 10 - 5,
+        z: Math.random() * 10 - 5,
+        color:
+          dbNode.id === "You" || dbNode.id === "Now"
+            ? "yellow"
+            : `hsl(${Math.random() * 360}, 70%, 60%)`,
+        ...((dbNode.id === "You" || dbNode.id === "Now") && {
+          fx: 0,
+          fy: 0,
+          fz: 0,
+        }),
+      }));
+
+      // Convert database links to frontend format
+      const frontendLinks: Link[] = graphData.links.map((dbLink: any) => ({
+        id: dbLink.id,
+        source: dbLink.source,
+        target: dbLink.target,
+        timeInMonths: 1,
+      }));
+
+      setNodes(frontendNodes);
+      setLinks(frontendLinks);
+    }
+  } catch (error) {
+    console.error("Error deleting node:", error);
+  }
+};
+
 export default function LifeWrap({ user }: { user: User }) {
   const [config, setConfig] = useState({
     prompt: "",
@@ -352,6 +419,9 @@ export default function LifeWrap({ user }: { user: User }) {
             );
             fgRef.current.d3Force("charge").strength(-300);
             fgRef.current.d3Force("link").distance(200);
+          }}
+          handleNodeDelete={(nodeId: string) => {
+            onNodeDelete(nodeId, user, setNodes, setLinks);
           }}
           fgRef={fgRef}
         />

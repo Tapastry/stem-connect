@@ -47,6 +47,7 @@ interface LifeProps {
   nodes: Node[];
   links: Link[];
   handleNodeClick: (nodeId: string) => void;
+  handleNodeDelete: (nodeId: string) => void;
   fgRef: RefObject<any>;
 }
 
@@ -56,6 +57,7 @@ export default function Life({
   nodes,
   links,
   handleNodeClick,
+  handleNodeDelete,
   fgRef,
 }: LifeProps) {
   const [isMounted, setIsMounted] = useState(false);
@@ -128,10 +130,17 @@ export default function Life({
           graphData={graphData}
           onNodeClick={(node: any, event: any) => {
             console.log("Node clicked in ForceGraph:", node.id, node);
-            console.log("Shift key held:", event?.shiftKey);
+            console.log(
+              "Shift key held:",
+              event?.shiftKey,
+              "Ctrl key held:",
+              event?.ctrlKey,
+            );
 
-            // Only generate new nodes if shift key is held
-            if (event?.shiftKey) {
+            if (event?.ctrlKey) {
+              console.log("Ctrl+Click: Deleting node:", node.id);
+              handleNodeDelete(node.id);
+            } else if (event?.shiftKey) {
               console.log(
                 "Shift+Click: Calling handleNodeClick with:",
                 node.id,
