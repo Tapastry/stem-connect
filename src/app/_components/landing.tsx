@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ForceGraph3D from "react-force-graph-3d";
 import SpriteText from "three-spritetext";
 
@@ -343,6 +343,21 @@ export default function Landing() {
       { source: "Mme.Hucheloup", target: "Enjolras", value: 1 },
     ],
   };
+
+  // make sure window is loaded
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsMounted(true);
+    }
+  }, []);
+
+  if (!isMounted) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full">
