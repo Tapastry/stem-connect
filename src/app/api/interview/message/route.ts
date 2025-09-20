@@ -33,7 +33,13 @@ export async function POST(request: NextRequest) {
       throw new Error(`Backend error: ${backendResponse.statusText}`);
     }
 
-    return NextResponse.json({ success: true });
+    const responseData = await backendResponse.json();
+    
+    return NextResponse.json({ 
+      success: true,
+      message_count: responseData.message_count,
+      should_check_completeness: responseData.should_check_completeness
+    });
   } catch (error) {
     console.error("Error sending message:", error);
     return NextResponse.json(

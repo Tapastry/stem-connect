@@ -1,18 +1,19 @@
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Dict, Tuple
+from typing import AsyncGenerator, Dict, Tuple, Any
 
 from google.adk.agents import LiveRequestQueue
-from google.adk.agents.run_config import RunConfig
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from google.genai.types import Blob, Content, Part
+from google.genai.types import Blob, Content, Part, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, AudioTranscriptionConfig
 
 from .interviewer import agent as interviewer_agent
 from .node_maker import agent as node_maker_agent
+from .reviewer import reviewer_agent
 
-active_sessions: Dict[str, LiveRequestQueue] = {}
+active_sessions: Dict[str, Tuple[LiveRequestQueue, int]] = {}  # Now stores (queue, message_count)
 
 APP_NAME = "Stem-Connect ADK Integration"
 
@@ -20,6 +21,7 @@ APP_NAME = "Stem-Connect ADK Integration"
 AGENT_MAP = {
     "interviewer_agent": interviewer_agent,
     "node_maker_agent": node_maker_agent,
+    "reviewer_agent": reviewer_agent,
 }
 
 
@@ -83,8 +85,58 @@ async def create_one_time_session(prompt: str, agent_type: str = "interviewer_ag
     return live_events, live_request_queue
 
 
-async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
-    """Starts an agent session for a given user (legacy method for backward compatibility)."""
+async def check_interview_completeness(user_id: str, conversation_history: str) -> Dict[str, Any]:
+    """
+    Check if the interview has gathered enough information using the reviewer agent.
+    
+    Returns a dictionary with completeness assessment.
+    """
+    prompt = f"""
+    Please analyze this interview conversation and determine if sufficient information has been gathered.
+    Return your assessment in JSON format.
+    
+    Conversation History:
+    {conversation_history}
+    """
+    
+    runner = InMemoryRunner(app_name=APP_NAME, agent=reviewer_agent)
+    response = await runner.run_one_shot(prompt=prompt)
+    
+    # Try to parse the JSON response
+    try:
+        import json
+        # Find JSON in the response (it might be wrapped in text)
+        response_text = response.output
+        json_start = response_text.find('{')
+        json_end = response_text.rfind('}') + 1
+        if json_start != -1 and json_end > json_start:
+            json_str = response_text[json_start:json_end]
+            return json.loads(json_str)
+    except:
+        # If parsing fails, return a default response
+        return {
+            "is_complete": False,
+            "completeness_score": 0.0,
+            "reason": "Unable to parse completeness check"
+        }
+
+
+async def get_or_create_session(user_id: str, is_audio: bool = False, force_new: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue, bool]:
+    """Gets existing session or creates new one. Returns (events, queue, is_new_session)"""
+    
+    # Check if session already exists and we don't want to force a new one
+    if user_id in active_sessions and not force_new:
+        print(f"Reusing existing session for user: {user_id}")
+        old_queue, message_count = active_sessions[user_id]
+        # For existing sessions, we need to create a new event stream but keep the queue
+        return None, old_queue, False
+    
+    # Close existing session if it exists
+    if user_id in active_sessions:
+        old_queue, _ = active_sessions[user_id]
+        old_queue.close()
+        del active_sessions[user_id]
+        print(f"Closed existing session for user: {user_id}")
 
     # Create a Runner
     runner = InMemoryRunner(
@@ -98,12 +150,31 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
         user_id=user_id,
     )
 
-    # response modality
+    # response modality and speech configuration
     modality = "AUDIO" if is_audio else "TEXT"
+    
+    # Configure speech for voice responses
+    speech_config = None
+    if is_audio:
+        speech_config = SpeechConfig(
+            voice_config=VoiceConfig(
+                prebuilt_voice_config=PrebuiltVoiceConfig(
+                    voice_name="Aoede"  # A pleasant, natural-sounding voice
+                )
+            )
+        )
+    
     run_config = RunConfig(
+        streaming_mode=StreamingMode.BIDI if is_audio else StreamingMode.SSE,
         response_modalities=[modality],
-        session_resumption=types.SessionResumptionConfig(),
+        speech_config=speech_config,
+        output_audio_transcription=AudioTranscriptionConfig() if is_audio else None,
+        input_audio_transcription=AudioTranscriptionConfig() if is_audio else None,
+        # Removed session_resumption to prevent duplicate messages during reconnection
+        # session_resumption=types.SessionResumptionConfig(),
     )
+    
+    print(f"🔧 RunConfig created - streaming_mode: {run_config.streaming_mode}, session_resumption: disabled")
 
     live_request_queue = LiveRequestQueue()
 
@@ -114,14 +185,40 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
         run_config=run_config,
     )
 
-    # Store the request queue for this user to send messages to the agent later
-    active_sessions[user_id] = live_request_queue
-    print(f"ADK session started for user: {user_id}")
+    # Store the request queue and message count for this user
+    active_sessions[user_id] = (live_request_queue, 0)
+    print(f"ADK session started for user: {user_id} with audio={'enabled' if is_audio else 'disabled'}")
+    print(f"Active sessions after creation: {list(active_sessions.keys())}")
 
-    # Send an initial prompt to the agent to start the conversation
-    initial_content = Content(role="user", parts=[Part.from_text(text="Hello! Please introduce yourself and start the interview.")])
-    live_request_queue.send_content(content=initial_content)
-    print(f"[INITIAL PROMPT SENT TO AGENT]")
+    return live_events, live_request_queue, True
+
+
+async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
+    """Starts an agent session for a given user (legacy method for backward compatibility)."""
+    print(f"🚨 [SESSION DEBUG] start_agent_session called for user: {user_id}, is_audio: {is_audio}")
+    print(f"🚨 [SESSION DEBUG] Current active sessions: {list(active_sessions.keys())}")
+    
+    live_events, live_request_queue, is_new = await get_or_create_session(user_id, is_audio, force_new=True)
+    
+    print(f"🚨 [SESSION DEBUG] Session creation result - is_new: {is_new}")
+    
+    # Only send initial prompt if this is truly a new conversation
+    message_count = active_sessions.get(user_id, (None, 0))[1]
+    should_send_initial = is_new and message_count == 0
+    
+    print(f"🚨 [SESSION DEBUG] Should send initial prompt: {should_send_initial} (is_new: {is_new}, message_count: {message_count})")
+    
+    if should_send_initial:
+        # Send an initial prompt to the agent to start the conversation
+        initial_prompt = "Hello! Please introduce yourself and start the interview."
+        if is_audio:
+            initial_prompt += " The user will be speaking to you via voice."
+        
+        initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
+        live_request_queue.send_content(content=initial_content)
+        print(f"🚨 [SESSION DEBUG] INITIAL PROMPT SENT TO AGENT - this will cause 'Hi there!' message")
+    else:
+        print(f"🚨 [SESSION DEBUG] No initial prompt sent - conversation already started")
 
     return live_events, live_request_queue
 
@@ -170,12 +267,23 @@ async def agent_to_client_sse(live_events: AsyncGenerator):
         if is_audio:
             audio_data = part.inline_data.data if part.inline_data else None
             if audio_data:
+                # Debug audio data
+                print(f"[AUDIO DEBUG] Raw audio data: {len(audio_data)} bytes")
+                
+                # According to ADK docs, Gemini Live API outputs 24kHz 16-bit PCM
+                sample_count = len(audio_data) // 2  # 16-bit = 2 bytes per sample
+                duration_ms = (sample_count / 24000) * 1000  # 24kHz sample rate
+                print(f"[AUDIO DEBUG] Samples: {sample_count}, Duration: {duration_ms:.1f}ms @ 24kHz")
+                
                 message = {
                     "mime_type": "audio/pcm",
                     "data": base64.b64encode(audio_data).decode("ascii"),
+                    "sample_rate": 24000,  # Add sample rate info
+                    "sample_count": sample_count,
+                    "duration_ms": round(duration_ms, 1)
                 }
                 yield f"data: {json.dumps(message)}\n\n"
-                print(f"[AGENT TO CLIENT]: audio/pcm: {len(audio_data)} bytes.")
+                print(f"[AGENT TO CLIENT]: audio/pcm: {len(audio_data)} bytes, {sample_count} samples @ 24kHz")
                 continue
 
         # Handle partial text data
@@ -215,19 +323,43 @@ async def generate_node_response(prompt: str, agent_type: str = "interviewer_age
     return response_text.strip()
 
 
-def send_message_to_agent(user_id: str, mime_type: str, data: str):
-    """Sends a message from the client to the agent."""
-    live_request_queue = active_sessions.get(user_id)
-    if not live_request_queue:
-        raise ValueError("Session not found for user")
+def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, Any]:
+    """
+    Sends a message from the client to the agent.
+    Returns info about the session including message count.
+    """
+    print(f"[SEND MESSAGE] User: {user_id}, Type: {mime_type}, Active sessions: {list(active_sessions.keys())}")
+    
+    session_data = active_sessions.get(user_id)
+    if not session_data:
+        print(f"[ERROR] Session not found for user {user_id}. Active sessions: {list(active_sessions.keys())}")
+        raise ValueError(f"Session not found for user {user_id}. Please refresh and try again.")
+    
+    live_request_queue, message_count = session_data
 
     if mime_type == "text/plain":
         content = Content(role="user", parts=[Part.from_text(text=data)])
         live_request_queue.send_content(content=content)
+        message_count += 1
         print(f"[CLIENT TO AGENT]: {data}")
     elif mime_type == "audio/pcm":
         decoded_data = base64.b64decode(data)
+        
+        # Debug input audio
+        sample_count = len(decoded_data) // 2  # 16-bit = 2 bytes per sample
+        duration_ms = (sample_count / 16000) * 1000  # Input is 16kHz
+        print(f"[AUDIO DEBUG] Input audio: {len(decoded_data)} bytes, {sample_count} samples @ 16kHz, {duration_ms:.1f}ms")
+        
         live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+        message_count += 1
         print(f"[CLIENT TO AGENT]: audio/pcm: {len(decoded_data)} bytes")
     else:
         raise ValueError(f"Mime type not supported: {mime_type}")
+    
+    # Update the session with new message count
+    active_sessions[user_id] = (live_request_queue, message_count)
+    
+    return {
+        "message_count": message_count,
+        "should_check_completeness": message_count >= 8 and message_count % 2 == 0  # Check every 2 messages after 8
+    }

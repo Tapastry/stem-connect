@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import random
 import string
@@ -107,13 +109,14 @@ security = HTTPBearer()
 @app.get("/adk/events/{user_id}")
 async def adk_events_endpoint(user_id: str, is_audio: str = "false"):
     """SSE endpoint for agent-to-client communication."""
+    print(f"🚨 [ENDPOINT DEBUG] /adk/events/{user_id} called with is_audio={is_audio}")
     live_events, live_request_queue = await adk.start_agent_session(user_id, is_audio == "true")
 
     def cleanup():
         live_request_queue.close()
         if user_id in adk.active_sessions:
             del adk.active_sessions[user_id]
-        print(f"Client #{user_id} disconnected from SSE")
+        print(f"Client #{user_id} disconnected from SSE, active sessions: {list(adk.active_sessions.keys())}")
 
     async def event_generator():
         try:
@@ -122,7 +125,9 @@ async def adk_events_endpoint(user_id: str, is_audio: str = "false"):
         except Exception as e:
             print(f"Error in SSE stream: {e}")
         finally:
-            cleanup()
+            # Don't cleanup immediately - let the session persist for bidirectional communication
+            print(f"SSE stream ended for {user_id}, session will remain active for message sending")
+            # Note: Session cleanup will happen when user switches modes or refreshes
 
     return StreamingResponse(
         event_generator(),
@@ -137,14 +142,19 @@ async def adk_events_endpoint(user_id: str, is_audio: str = "false"):
 
 @app.post("/adk/send/{user_id}")
 async def adk_send_message_endpoint(user_id: str, request: Request):
-    """HTTP endpoint for client-to-agent communication."""
+    """HTTP endpoint for client-to-agent communication with audio support."""
     try:
         message = await request.json()
         mime_type = message["mime_type"]
         data = message["data"]
 
-        adk.send_message_to_agent(user_id, mime_type, data)
-        return {"status": "sent"}
+        session_info = adk.send_message_to_agent(user_id, mime_type, data)
+        
+        return {
+            "status": "sent",
+            "message_count": session_info["message_count"],
+            "should_check_completeness": session_info["should_check_completeness"]
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -152,7 +162,51 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# MOCK - Generate a node programatically to test the frontend
+@app.get("/adk/session-status/{user_id}")
+async def get_session_status(user_id: str):
+    """Check if a session exists for a user (for debugging)."""
+    return {
+        "user_id": user_id,
+        "session_exists": user_id in adk.active_sessions,
+        "active_sessions": list(adk.active_sessions.keys()),
+        "total_sessions": len(adk.active_sessions)
+    }
+
+
+@app.delete("/adk/session/{user_id}")
+async def cleanup_session(user_id: str):
+    """Manually cleanup a session."""
+    if user_id in adk.active_sessions:
+        live_request_queue, _ = adk.active_sessions[user_id]
+        live_request_queue.close()
+        del adk.active_sessions[user_id]
+        return {"message": f"Session {user_id} cleaned up", "active_sessions": list(adk.active_sessions.keys())}
+    else:
+        return {"message": f"No session found for {user_id}", "active_sessions": list(adk.active_sessions.keys())}
+
+
+@app.post("/adk/check-completeness/{user_id}")
+async def check_interview_completeness_endpoint(user_id: str, request: Request):
+    """Check if the interview has gathered sufficient information."""
+    try:
+        body = await request.json()
+        conversation_history = body.get("conversation_history", "")
+        
+        if not conversation_history:
+            raise HTTPException(status_code=400, detail="Conversation history is required")
+        
+        completeness_result = await adk.check_interview_completeness(user_id, conversation_history)
+        
+        return {
+            "status": "checked",
+            **completeness_result
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Generate a Node with ADK, Insert to database, and return the node
 @app.post("/api/add-node")
 async def add_node(request: AddNodeRequest):
     try:
