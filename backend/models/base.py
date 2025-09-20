@@ -11,15 +11,7 @@ from pydantic import BaseModel
 class Node(BaseModel):
     """Represents a life path node/decision point."""
 
-    id: Optional[str] = None
-    name: str
-    title: Optional[str] = None
-    type: str
-    imageName: Optional[str] = None
-    time: Optional[str] = None
-    description: Optional[str] = None
-    createdAt: Optional[datetime] = None
-    userId: str
+    id: str
 
 
 class Link(BaseModel):

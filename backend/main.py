@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from models import AddNodeRequest, AddPersonalInformationRequest, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
+from models import AddNodeRequest, AddPersonalInformationRequest, Node, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -86,36 +86,22 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Generate a Node with ADK, Insert to database, and return the node
+# MOCK - Generate a node programatically to test the frontend
 @app.post("/api/add-node")
 async def add_node(request: AddNodeRequest):
     try:
-        # Grab personal information from database
-        personal_information = await get_personal_information(request.user_id)
+        # get prior nodes
+        prior_nodes = request.previous_nodes
+        return_nodes = []
 
-        # Create a prompt for node generation based on the current node and parameters
-        prompt = f"""
-        Generate {request.num_nodes} life path decisions/scenarios based on this root node:
-        
-        Current Node: {request.root.name}
-        
-        Root Node: {request.root.name}
-        Description: {request.root.description or "No description provided"}
-        Type: {request.type}
-        Time frame: {request.edge_in_month} months
-        
-        Generate realistic life path options that branch from this point, considering the time frame and type specified.
-        Each option should be a distinct choice or scenario that could realistically happen.
-        """
+        for i in range(request.num_nodes):
+            # create new name based on first letter of each prior node's id
+            prefix = "".join([node.id[0] for node in prior_nodes if node.id])
+            new_id = f"{prefix}-{i + 1}" if prefix else f"Node-{i + 1}"
+            new_node = Node(id=new_id)
+            return_nodes.append(new_node)
 
-        # Use the new one-time session to generate nodes without chat history
-        generated_response = await adk.generate_node_response(prompt, request.agent_type)
-
-        # TODO: Parse the response and create actual nodes
-        # TODO: Insert nodes into database
-        # TODO: Return structured node data
-
-        return {"message": "Node generation completed", "generated_content": generated_response, "root_node": request.root.dict(), "parameters": {"num_nodes": request.num_nodes, "edge_in_month": request.edge_in_month, "type": request.type}}
+        return return_nodes
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")

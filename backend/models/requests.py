@@ -12,11 +12,12 @@ from .base import Node, PersonalInformation
 class AddNodeRequest(BaseModel):
     """Request model for adding new nodes."""
 
-    root: Node
+    previous_nodes: List[Node]
+    prompt: str
     num_nodes: int
-    edge_in_month: int
-    type: str
-    agent_type: Optional[str]
+    time_in_months: int
+    node_type: str
+    positivity: int
 
 
 class AddPersonalInformationRequest(BaseModel):

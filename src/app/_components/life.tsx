@@ -6,7 +6,7 @@ import ForceGraph from "react-force-graph-3d";
 import * as THREE from "three";
 import SpriteText from "three-spritetext";
 import { getHighlightPath } from "./highlight";
-import { createCollapsibleGraph } from "./pruned";
+import { createSimpleGraph } from "./pruned";
 
 interface Node {
   id: string;
@@ -23,6 +23,15 @@ interface Link {
   id: string;
   source: string;
   target: string;
+  timeInMonths?: number;
+}
+
+interface Config {
+  prompt: string;
+  positivity: number;
+  time_in_months: number;
+  type: string;
+  num_nodes: number;
 }
 
 interface LifeProps {
@@ -30,6 +39,7 @@ interface LifeProps {
   setHighlightedPath?: (path: string[]) => void;
   nodes: Node[];
   links: Link[];
+  handleNodeClick: (nodeId: string) => void;
 }
 
 export default function Life({
@@ -37,6 +47,7 @@ export default function Life({
   setHighlightedPath,
   nodes,
   links,
+  handleNodeClick,
 }: LifeProps) {
   const [isMounted, setIsMounted] = useState(false);
   const fgRef = useRef<any>({});
@@ -51,12 +62,37 @@ export default function Life({
     }
   }, []);
 
-  const graphManager = useMemo(
-    () => createCollapsibleGraph(nodes, links, "Now"),
-    [],
+  // Memoize node colors to prevent them from changing on hover
+  const nodeColors = useMemo(() => {
+    const colors: { [nodeId: string]: string } = {};
+    nodes.forEach((node) => {
+      if (node.id === "Now") {
+        colors[node.id] = "yellow";
+      } else {
+        const hasOutgoingLinks = links.some((link) => link.source === node.id);
+        colors[node.id] = hasOutgoingLinks ? "red" : "green";
+      }
+    });
+    console.log("Calculated node colors:", colors);
+    return colors;
+  }, [nodes, links]);
+
+  const [graphData, setGraphData] = useState(() =>
+    createSimpleGraph(nodes, links),
   );
 
-  const [graphData, setGraphData] = useState(graphManager.getPrunedGraph());
+  // Update graph data when nodes or links change
+  useEffect(() => {
+    console.log(
+      "Updating graph with nodes:",
+      nodes.length,
+      "links:",
+      links.length,
+    );
+    const newGraphData = createSimpleGraph(nodes, links);
+    console.log("Graph data for ForceGraph:", newGraphData);
+    setGraphData(newGraphData);
+  }, [nodes, links]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -74,24 +110,20 @@ export default function Life({
           width={size.width}
           height={size.height}
           graphData={graphData}
+          key={`graph-${nodes.length}-${links.length}`}
           onNodeClick={(node: any) => {
-            //Generate Data
-            if (!node.childLinks || node.childLinks.length === 0) return;
-            graphManager.toggleNode(node.id);
-            setGraphData(graphManager.getPrunedGraph());
-            fgRef.current.d3Force("charge").strength(-200);
+            console.log("Node clicked in ForceGraph:", node.id, node);
 
-            fgRef.current.d3Force("link").distance(60);
+            // Just generate new nodes - no expansion logic needed
+            console.log("Calling handleNodeClick with:", node.id);
+            handleNodeClick(node.id);
           }}
           nodeThreeObjectExtend={false}
           nodeThreeObject={(node: any) => {
             const group = new THREE.Group();
-            const color =
-              !node.childLinks || node.childLinks.length === 0
-                ? "green"
-                : node.collapsed
-                  ? "red"
-                  : "yellow";
+
+            // Use the memoized color that won't change on hover
+            const color = nodeColors[node.id] || "green";
 
             // === Base size from nodeVal logic ===
             const radius = node.id === "Now" ? 10 : 4;
@@ -180,6 +212,12 @@ export default function Life({
               ? 4
               : 0
           }
+          linkDistance={(link) => {
+            // Use the timeInMonths value stored with the link to determine distance
+            const timeInMonths = link.timeInMonths || 1;
+            // Scale the distance: 1 month = 20 units, max 240 units (12 months * 20)
+            return Math.min(timeInMonths * 20, 240);
+          }}
           onNodeDragEnd={(node) => {
             // Keep "Now" fixed, but allow other nodes to be positioned
             if (node.id === "Now") {
