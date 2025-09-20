@@ -40,3 +40,41 @@ curl -N http://localhost:8000/adk/events/123
 ```
 
 You should see the agent's welcome message stream to your terminal.
+
+### 5. testing the branching logic
+
+You can test the context-aware branching by creating a few nodes in sequence.
+
+**Create the root node:**
+```bash
+curl -X POST http://localhost:8000/api/nodes \\
+-H "Content-Type: application/json" \\
+-d '{
+    "id": "node-a",
+    "user_id": "user-test-summarize",
+    "attached_nodes_ids": [],
+    "prompt_override": "Generate a starting scenario: A young artist decides to move to a bustling city to pursue their dream."
+}'
+```
+
+**Create a second node branching from the first:**
+```bash
+curl -X POST http://localhost:8000/api/nodes \\
+-H "Content-Type: application/json" \\
+-d '{
+    "id": "node-b",
+    "user_id": "user-test-summarize",
+    "attached_nodes_ids": ["node-a"]
+}'
+```
+
+**Create a third node to trigger summarization:**
+```bash
+curl -X POST http://localhost:8000/api/nodes \\
+-H "Content-Type: application/json" \\
+-d '{
+    "id": "node-c",
+    "user_id": "user-test-summarize",
+    "attached_nodes_ids": ["node-b"]
+}'
+```
