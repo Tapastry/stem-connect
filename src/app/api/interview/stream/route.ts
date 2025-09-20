@@ -13,12 +13,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
+    const isAudio = searchParams.get("isAudio") === "true";
+    
     if (userId !== session.user.id) {
       return new Response("Forbidden", { status: 403 });
     }
 
-    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/adk/events/${userId}`;
-    console.log(`Proxying SSE request for user ${userId} to ${backendUrl}`);
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/adk/events/${userId}?is_audio=${isAudio}`;
+    console.log(`Proxying SSE request for user ${userId} to ${backendUrl} (audio: ${isAudio})`);
 
     // Retry logic for 404 errors (session might not be ready yet)
     let backendResponse;
