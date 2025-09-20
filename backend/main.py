@@ -216,23 +216,38 @@ async def generate_life_events_with_ai(prior_nodes: List[Node], prompt: str, nod
         # Build the prompt
         context_str = "\n".join(context_parts) if context_parts else "Starting a new life journey."
 
+        # Handle random values for each event
+        events_config = []
+        for i in range(num_nodes):
+            event_time = time_in_months if time_in_months > 0 else random.randint(1, 24)
+            event_positivity = positivity if positivity >= 0 else random.randint(0, 100)
+            events_config.append({"time_months": event_time, "positivity": event_positivity})
+
         positivity_guidance = ""
         if positivity >= 0:
             if positivity <= 30:
-                positivity_guidance = "This should be a challenging or difficult life event."
+                positivity_guidance = "All events should be challenging or difficult."
             elif positivity <= 70:
-                positivity_guidance = "This should be a neutral or mixed life event."
+                positivity_guidance = "All events should be neutral or mixed."
             else:
-                positivity_guidance = "This should be a positive and favorable life event."
+                positivity_guidance = "All events should be positive and favorable."
+        else:
+            positivity_guidance = "Mix positive, neutral, and challenging events for variety."
 
-        node_type_guidance = f"The event should be related to: {node_type}" if node_type else ""
+        time_guidance = ""
+        if time_in_months > 0:
+            time_guidance = f"All events should occur around {time_in_months} months from now."
+        else:
+            time_guidance = "Events can occur at different timeframes (1-24 months) for variety."
+
+        node_type_guidance = f"The events should be related to: {node_type}" if node_type else ""
 
         ai_prompt = f"""
         {context_str}
         
-        Generate {num_nodes} different realistic life events that could happen {time_in_months} months from the current situation. 
-        Make each event unique and diverse - they should represent different possible paths or choices.
+        Generate {num_nodes} different realistic life events. Make each event unique and diverse - they should represent different possible paths or choices.
         
+        {time_guidance}
         {positivity_guidance}
         {node_type_guidance}
         
@@ -243,9 +258,11 @@ async def generate_life_events_with_ai(prior_nodes: List[Node], prompt: str, nod
         - "title": A descriptive title (5-10 words)  
         - "description": A detailed description (2-3 sentences)
         - "type": The category of this event (career, relationship, health, education, etc.)
+        - "time_months": The number of months from now this event occurs (1-24)
+        - "positivity_score": How positive this event is (0-100, where 0=very challenging, 100=very positive)
         
         Make each event unique and realistic. They should represent different possible life directions or choices.
-        Example format: [{{"name": "Career Change", "title": "Switched to Data Science", "description": "...", "type": "career"}}, ...]
+        Example format: [{{"name": "Career Change", "title": "Switched to Data Science", "description": "...", "type": "career", "time_months": 6, "positivity_score": 75}}, ...]
         """
 
         if GEMINI_API_KEY:
@@ -266,7 +283,17 @@ async def generate_life_events_with_ai(prior_nodes: List[Node], prompt: str, nod
                     else:
                         # Pad with fallback events if not enough generated
                         while len(events) < num_nodes:
-                            events.append({"name": f"Event {len(events) + 1}", "title": f"Generated Life Event {len(events) + 1}", "description": f"A life event that occurs {time_in_months} months from now.", "type": "generated"})
+                            event_idx = len(events)
+                            events.append(
+                                {
+                                    "name": f"Event {event_idx + 1}",
+                                    "title": f"Generated Life Event {event_idx + 1}",
+                                    "description": f"A life event that occurs {events_config[event_idx]['time_months']} months from now.",
+                                    "type": "generated",
+                                    "time_months": events_config[event_idx]["time_months"],
+                                    "positivity_score": events_config[event_idx]["positivity"],
+                                }
+                            )
                         return events
                 else:
                     raise ValueError("No JSON array found in response")
@@ -274,15 +301,31 @@ async def generate_life_events_with_ai(prior_nodes: List[Node], prompt: str, nod
                 print(f"Failed to parse AI response as JSON: {e}")
                 print(f"AI Response: {response.text}")
                 # Fallback to generating multiple basic events
-                return [{"name": f"AI Event {i + 1}", "title": f"AI Generated Event {i + 1}", "description": f"Part of AI response: {response.text[i * 50 : (i + 1) * 50]}..." if i * 50 < len(response.text) else f"Generated event {i + 1}", "type": "ai-generated"} for i in range(num_nodes)]
+                return [
+                    {
+                        "name": f"AI Event {i + 1}",
+                        "title": f"AI Generated Event {i + 1}",
+                        "description": f"Part of AI response: {response.text[i * 50 : (i + 1) * 50]}..." if i * 50 < len(response.text) else f"Generated event {i + 1}",
+                        "type": "ai-generated",
+                        "time_months": events_config[i]["time_months"],
+                        "positivity_score": events_config[i]["positivity"],
+                    }
+                    for i in range(num_nodes)
+                ]
         else:
             # Fallback when no API key - generate multiple events
-            return [{"name": f"Event {i + 1}", "title": f"Generated Life Event {i + 1}", "description": f"A life event that occurs {time_in_months} months from now.", "type": "generated"} for i in range(num_nodes)]
+            return [
+                {"name": f"Event {i + 1}", "title": f"Generated Life Event {i + 1}", "description": f"A life event that occurs {events_config[i]['time_months']} months from now.", "type": "generated", "time_months": events_config[i]["time_months"], "positivity_score": events_config[i]["positivity"]}
+                for i in range(num_nodes)
+            ]
 
     except Exception as e:
         print(f"AI generation error: {e}")
         # Fallback to basic generation - generate multiple events
-        return [{"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": f"A significant life event occurring {time_in_months} months from the current situation.", "type": "fallback"} for i in range(num_nodes)]
+        return [
+            {"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": f"A significant life event occurring {events_config[i]['time_months']} months from the current situation.", "type": "fallback", "time_months": events_config[i]["time_months"], "positivity_score": events_config[i]["positivity"]}
+            for i in range(num_nodes)
+        ]
 
 
 # Generate a Node with AI, Insert to database, and return the node
@@ -312,7 +355,11 @@ async def add_node(request: AddNodeRequest):
                 readable_id = f"{base_id} {counter}"
                 counter += 1
 
-            new_node = Node(id=readable_id, name=ai_content["name"], description=ai_content["description"], type=ai_content["type"], image_name="", time=f"{request.time_in_months} months", title=ai_content["title"], created_at=created_at, user_id=user_id)
+            # Use AI-generated time if available, otherwise use request time or random
+            event_time_months = ai_content.get("time_months", request.time_in_months if request.time_in_months > 0 else random.randint(1, 24))
+            event_positivity = ai_content.get("positivity_score", request.positivity if request.positivity >= 0 else random.randint(0, 100))
+
+            new_node = Node(id=readable_id, name=ai_content["name"], description=ai_content["description"], type=ai_content["type"], image_name="", time=f"{event_time_months} months (positivity: {event_positivity}%)", title=ai_content["title"], created_at=created_at, user_id=user_id)
             return_nodes.append(new_node)
 
         # create links from the clicked node to all new nodes
