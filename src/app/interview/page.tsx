@@ -7,6 +7,7 @@ import PCMVoiceRecorder from "~/components/PCMVoiceRecorder";
 import {
   clearAudioQueue,
   initializeGlobalAudioContext,
+  isAgentSpeaking,
   playPCMAudio,
   startAudioPlayback
 } from "~/lib/pcmAudio";
@@ -50,11 +51,22 @@ export default function InterviewPage() {
     conversationStateRef.current.hasReceivedInitialMessage = hasReceivedInitialMessage;
   }, [hasReceivedInitialMessage]);
   const [agentTurn, setAgentTurn] = useState(true); // true when agent is speaking, false when user can respond
+  
+  // Debug agentTurn changes
+  useEffect(() => {
+    console.log(`🔄 AGENT TURN STATE CHANGED: ${agentTurn ? 'AGENT\'S TURN (mic disabled)' : 'USER\'S TURN (mic enabled)'}`);
+  }, [agentTurn]);
   const [waitingForUserResponse, setWaitingForUserResponse] = useState(false);
   const [seenMessageHashes, setSeenMessageHashes] = useState<Set<string>>(new Set());
+  const processedMessageIdsRef = useRef<Set<string>>(new Set()); // Track processed message IDs
   const [isConnecting, setIsConnecting] = useState(false);
   const [audioContextReady, setAudioContextReady] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const agentTurnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [turnSwitchCountdown, setTurnSwitchCountdown] = useState(0);
+  const lastAudioChunkTimeRef = useRef<number>(0);
+  const audioInactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastConnectionAttemptRef = useRef<number>(0);
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -185,9 +197,29 @@ export default function InterviewPage() {
 
   const createNewConnection = () => {
     if (!session?.user?.id || isConnecting) return;
+    
+    // Prevent rapid reconnections
+    const now = Date.now();
+    const timeSinceLastAttempt = now - lastConnectionAttemptRef.current;
+    const MIN_CONNECTION_INTERVAL = 2000; // 2 seconds between connection attempts
+    
+    if (timeSinceLastAttempt < MIN_CONNECTION_INTERVAL) {
+      console.log(`⏳ Connection attempt too soon (${timeSinceLastAttempt}ms < ${MIN_CONNECTION_INTERVAL}ms) - skipping to prevent duplicates`);
+      return;
+    }
+    
+    lastConnectionAttemptRef.current = now;
+    
+    // Close any existing connection first
+    if (eventSourceRef.current) {
+      console.log("🔌 Closing existing SSE connection before creating new one");
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
 
     setIsConnecting(true);
     const sseUrl = `/api/interview/stream?userId=${session.user.id}&isAudio=${isAudioMode}`;
+    console.log("🔗 Creating new SSE connection:", sseUrl);
     
     const eventSource = new EventSource(sseUrl);
     eventSourceRef.current = eventSource;
@@ -209,37 +241,103 @@ export default function InterviewPage() {
       
       try {
         const data = JSON.parse(event.data);
+        console.log("📨 SSE Event:", data);
         
         // Handle turn complete
         if (data.turn_complete) {
-          if (currentAgentMessageRef.current.trim()) {
-            const messageContent = currentAgentMessageRef.current.trim();
-            const messageHash = hashMessage(messageContent);
-            
-            // Check if we've seen this message hash before
-            const isDuplicate = seenMessageHashes.has(messageHash);
-            
-            if (!isDuplicate) {
-              // Add hash to seen messages
-              setSeenMessageHashes(prev => new Set([...prev, messageHash]));
+          console.log("🏁 Turn complete received - switching to user's turn");
+          
+          // In audio mode, we might not have accumulated text, so handle differently
+          if (isAudioMode) {
+            // For audio mode, if we have accumulated text, add it to chat
+            if (currentAgentMessageRef.current.trim() && !currentAgentMessageRef.current.includes("🔊")) {
+              const messageContent = currentAgentMessageRef.current.trim();
+              const messageHash = hashMessage(messageContent);
+              const messageId = `agent-${Date.now()}-${messageHash}`;
               
-              setMessages(prev => [...prev, {
-                role: "agent",
-                content: messageContent,
-                timestamp: new Date(),
-                id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-              }]);
-              
-              // Agent finished speaking, now it's user's turn
-              setAgentTurn(false);
-              setWaitingForUserResponse(true);
-              
+              // Check both hash and ID for stronger duplicate prevention
+              if (!seenMessageHashes.has(messageHash) && !processedMessageIdsRef.current.has(messageId)) {
+                console.log(`✅ Adding new agent message: "${messageContent.substring(0, 50)}..."`);
+                setSeenMessageHashes(prev => new Set([...prev, messageHash]));
+                processedMessageIdsRef.current.add(messageId);
+                
+                setMessages(prev => [...prev, {
+                  role: "agent",
+                  content: messageContent,
+                  timestamp: new Date(),
+                  id: messageId
+                }]);
+              } else {
+                console.log(`🚫 Duplicate agent message blocked: "${messageContent.substring(0, 50)}..."`);
+              }
             }
             
-            currentAgentMessageRef.current = "";
+            // Clear the speaking indicator
             setCurrentAgentMessage("");
+            currentAgentMessageRef.current = "";
+            
+            // Agent finished speaking, now it's user's turn
+            console.log("👤 SWITCHING TO USER'S TURN - Agent finished speaking (AUDIO MODE)");
+            
+            // Clear all timeouts
+            if (agentTurnTimeoutRef.current) {
+              clearTimeout(agentTurnTimeoutRef.current);
+              agentTurnTimeoutRef.current = null;
+            }
+            if (audioInactivityTimeoutRef.current) {
+              clearTimeout(audioInactivityTimeoutRef.current);
+              audioInactivityTimeoutRef.current = null;
+            }
+            
+            // Add a small delay to prevent race conditions with audio processing
+            setTurnSwitchCountdown(2); // Start countdown from 2 seconds
+            
+            const countdownInterval = setInterval(() => {
+              setTurnSwitchCountdown(prev => {
+                if (prev <= 1) {
+                  clearInterval(countdownInterval);
+                  console.log("✅ Turn switch delay complete - mic now enabled");
+                  setAgentTurn(false);
+                  setWaitingForUserResponse(true);
+                  return 0;
+                }
+                return prev - 1;
+              });
+            }, 1000); // Update every second
+            
+          } else {
+            // Text mode - original logic
+            if (currentAgentMessageRef.current.trim()) {
+              const messageContent = currentAgentMessageRef.current.trim();
+              const messageHash = hashMessage(messageContent);
+              const messageId = `agent-${Date.now()}-${messageHash}`;
+              
+              // Check both hash and ID for stronger duplicate prevention
+              if (!seenMessageHashes.has(messageHash) && !processedMessageIdsRef.current.has(messageId)) {
+                console.log(`✅ Adding new agent message (TEXT): "${messageContent.substring(0, 50)}..."`);
+                setSeenMessageHashes(prev => new Set([...prev, messageHash]));
+                processedMessageIdsRef.current.add(messageId);
+                
+                setMessages(prev => [...prev, {
+                  role: "agent",
+                  content: messageContent,
+                  timestamp: new Date(),
+                  id: messageId
+                }]);
+              } else {
+                console.log(`🚫 Duplicate agent message blocked (TEXT): "${messageContent.substring(0, 50)}..."`);
+              }
+              
+              currentAgentMessageRef.current = "";
+              setCurrentAgentMessage("");
+            }
+            
+            // Agent finished speaking, now it's user's turn
+            console.log("👤 SWITCHING TO USER'S TURN - Agent finished speaking (TEXT MODE)");
+            setAgentTurn(false);
+            setWaitingForUserResponse(true);
           }
-          // Note: Don't clear audio queue here as audio chunks may still be playing
+          
           return;
         }
 
@@ -249,9 +347,56 @@ export default function InterviewPage() {
           
           // If agent is sending audio, it means agent is speaking - disable user input
           if (!agentTurn) {
+            console.log("🤖 SWITCHING TO AGENT'S TURN - Agent started speaking (AUDIO)");
             setAgentTurn(true);
             setWaitingForUserResponse(false);
+            
+            // Safety timeout: If no turn_complete after 30 seconds, force switch to user's turn
+            if (agentTurnTimeoutRef.current) {
+              clearTimeout(agentTurnTimeoutRef.current);
+            }
+            agentTurnTimeoutRef.current = setTimeout(() => {
+              console.log("⏰ SAFETY TIMEOUT: Agent turn took too long, forcing switch to user's turn");
+              setAgentTurn(false);
+              setWaitingForUserResponse(true);
+            }, 30000);
           }
+          
+          // Show visual indicator for audio mode
+          if (isAudioMode && !currentAgentMessage.includes("🔊")) {
+            setCurrentAgentMessage("🔊 [Speaking...]");
+          }
+          
+          // Track when we last received an audio chunk for fallback turn switching
+          lastAudioChunkTimeRef.current = Date.now();
+          
+          // Clear any existing audio inactivity timeout
+          if (audioInactivityTimeoutRef.current) {
+            clearTimeout(audioInactivityTimeoutRef.current);
+          }
+          
+          // Set a fallback timeout - if no more audio chunks for 3 seconds, assume agent finished
+          audioInactivityTimeoutRef.current = setTimeout(() => {
+            if (agentTurn) {
+              console.log("⏰ FALLBACK: No audio chunks for 3s, assuming agent finished speaking");
+              console.log("👤 FALLBACK SWITCHING TO USER'S TURN");
+              
+              // Start the countdown
+              setTurnSwitchCountdown(2);
+              const countdownInterval = setInterval(() => {
+                setTurnSwitchCountdown(prev => {
+                  if (prev <= 1) {
+                    clearInterval(countdownInterval);
+                    console.log("✅ Fallback turn switch delay complete - mic now enabled");
+                    setAgentTurn(false);
+                    setWaitingForUserResponse(true);
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
+            }
+          }, 3000); // 3 seconds of no audio chunks = agent probably finished
           
           try {
             // Create AudioContext on user interaction if not already created
@@ -265,6 +410,7 @@ export default function InterviewPage() {
         if (data.mime_type === "text/plain" && data.data) {
           // If agent is sending text, it means agent is speaking - disable user input
           if (!agentTurn) {
+            console.log("🤖 SWITCHING TO AGENT'S TURN - Agent started speaking (TEXT)");
             setAgentTurn(true);
             setWaitingForUserResponse(false);
           }
@@ -303,7 +449,14 @@ export default function InterviewPage() {
       console.error("❌ SSE connection error:", error);
       setIsConnected(false);
       setIsConnecting(false);
-      // Optional: Add reconnection logic here
+      
+      // Auto-reconnect after 5 seconds (longer delay to prevent connection spam)
+      setTimeout(() => {
+        if (session?.user?.id && !isConnecting) {
+          console.log("🔄 Auto-reconnecting SSE after error...");
+          createNewConnection();
+        }
+      }, 5000);
     };
   };
 
@@ -324,6 +477,7 @@ export default function InterviewPage() {
     }
 
     // User is now speaking, agent should wait
+    console.log("🎤 USER SENT AUDIO - switching to agent's turn");
     setAgentTurn(true);
     setWaitingForUserResponse(false);
     console.log("🎤 Sending audio data:", mimeType, audioData.length);
@@ -350,6 +504,19 @@ export default function InterviewPage() {
       console.log("✅ Audio sent successfully", result);
       
       messageCountRef.current = result.message_count || 0;
+      
+      // Add a fallback timeout - if no agent response within 10 seconds, switch back to user's turn
+      const noResponseTimeout = setTimeout(() => {
+        if (agentTurn) {
+          console.log("⏰ NO AGENT RESPONSE: 10s timeout, switching back to user's turn");
+          setAgentTurn(false);
+          setWaitingForUserResponse(true);
+          setTurnSwitchCountdown(0);
+        }
+      }, 10000);
+      
+      // Clear timeout when component unmounts or agent responds (cleanup after 15s)
+      setTimeout(() => clearTimeout(noResponseTimeout), 15000);
       
       // Check completeness if suggested by backend
       if (result.should_check_completeness && !interviewComplete) {
@@ -512,7 +679,13 @@ export default function InterviewPage() {
                   hasReceivedInitialMessage,
                   messagesCount: messages.length
                 });
-                clearAudioQueue(); // Clear any pending audio
+                
+                // Only clear audio queue if agent isn't actively speaking
+                if (isAgentSpeaking()) {
+                  console.log("🚫 [MODE SWITCH] Agent is speaking - protecting audio queue");
+                } else {
+                  clearAudioQueue(); // Clear any pending audio
+                }
                 setIsAudioMode(!isAudioMode);
                 setIsConnected(false); // Show reconnecting state
                 // Don't reset conversation state when switching modes
@@ -673,12 +846,33 @@ export default function InterviewPage() {
                   isConnected={isConnected}
                   disabled={!isConnected || interviewComplete || agentTurn}
                 />
-                <p className="text-xs text-gray-500 text-center">
-                  {agentTurn 
-                    ? "Wait for agent to finish speaking..." 
-                    : "Hold to speak • Release to send • Switch to text mode anytime"
-                  }
-                </p>
+                <div className="text-center">
+                  <p className="text-xs text-gray-500">
+                    {agentTurn 
+                      ? (turnSwitchCountdown > 0 
+                          ? `Mic available in ${turnSwitchCountdown}s...` 
+                          : "Wait for agent to finish speaking...")
+                      : "Hold to speak • Release to send • Switch to text mode anytime"
+                    }
+                  </p>
+                  {agentTurn && (
+                    <button
+                      onClick={() => {
+                        console.log("🔧 MANUAL OVERRIDE: Forcing switch to user's turn");
+                        setAgentTurn(false);
+                        setWaitingForUserResponse(true);
+                        setTurnSwitchCountdown(0);
+                        if (agentTurnTimeoutRef.current) {
+                          clearTimeout(agentTurnTimeoutRef.current);
+                          agentTurnTimeoutRef.current = null;
+                        }
+                      }}
+                      className="mt-2 px-3 py-1 text-xs bg-yellow-600/20 border border-yellow-500/30 rounded-lg hover:bg-yellow-600/30 transition-colors"
+                    >
+                      🔧 Enable Mic (if stuck)
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <form

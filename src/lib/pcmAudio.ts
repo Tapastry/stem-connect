@@ -165,6 +165,7 @@ let audioQueue: Array<() => Promise<void>> = [];
 let isPlaying = false;
 let globalAudioContext: AudioContext | null = null;
 let isAudioInitialized = false;
+let agentSpeaking = false; // Track if agent is actively speaking
 
 /**
  * Initialize the global AudioContext. Must be called after a user gesture.
@@ -204,21 +205,39 @@ async function processAudioQueue() {
   if (isPlaying || audioQueue.length === 0 || !isAudioInitialized) return;
   
   isPlaying = true;
+  console.log(`🎵 [QUEUE] Starting to process ${audioQueue.length} audio chunks`);
   
   while (audioQueue.length > 0) {
     const playFunction = audioQueue.shift()!;
+    console.log(`🎵 [QUEUE] Playing chunk ${audioQueue.length + 1} of original queue`);
     await playFunction();
   }
   
   isPlaying = false;
+  agentSpeaking = false; // Agent finished speaking
+  console.log(`🎵 [QUEUE] All audio chunks completed - agent finished speaking`);
 }
 
 /**
  * Clear the audio queue (useful when switching modes or ending conversation)
  */
-export function clearAudioQueue(): void {
+/**
+ * Check if the agent is currently speaking
+ */
+export function isAgentSpeaking(): boolean {
+  return agentSpeaking || isPlaying || audioQueue.length > 0;
+}
+
+export function clearAudioQueue(force: boolean = false): void {
+  if (agentSpeaking && !force) {
+    console.log(`🚫 [QUEUE] Cannot clear audio queue - agent is actively speaking (${audioQueue.length} chunks protected)`);
+    return;
+  }
+  
+  console.log(`🎵 [QUEUE] CLEARING AUDIO QUEUE - ${audioQueue.length} chunks discarded${force ? ' (FORCED)' : ''}`);
   audioQueue = [];
   isPlaying = false;
+  agentSpeaking = false;
 }
 
 /**
@@ -226,6 +245,9 @@ export function clearAudioQueue(): void {
  */
 export async function playPCMAudio(base64Data: string, sampleRate: number = 24000): Promise<void> {
   return new Promise((resolve) => {
+    // Mark agent as speaking when audio is queued
+    agentSpeaking = true;
+    
     // Add to queue instead of playing immediately
     audioQueue.push(async () => {
       await playPCMAudioImmediate(base64Data, sampleRate);
@@ -277,9 +299,16 @@ async function playPCMAudioImmediate(base64Data: string, sampleRate: number = 24
       
       // Add event listeners for debugging
       source.onended = () => {
+        console.log(`🎵 [PLAYBACK] Audio chunk finished playing`);
         resolve(); // Resolve when playback actually ends
       };
       
+      source.onerror = (error) => {
+        console.error(`❌ [PLAYBACK] Audio playback error:`, error);
+        resolve(); // Resolve even on error to prevent hanging
+      };
+      
+      console.log(`🎵 [PLAYBACK] Starting audio chunk playback`);
       source.start();
     });
   } catch (error) {

@@ -350,6 +350,12 @@ def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, 
         duration_ms = (sample_count / 16000) * 1000  # Input is 16kHz
         print(f"[AUDIO DEBUG] Input audio: {len(decoded_data)} bytes, {sample_count} samples @ 16kHz, {duration_ms:.1f}ms")
         
+        # Validate minimum audio duration to prevent agent confusion
+        MIN_DURATION_MS = 800  # Minimum 800ms to match frontend validation
+        if duration_ms < MIN_DURATION_MS:
+            print(f"[AUDIO WARNING] Audio too short ({duration_ms:.1f}ms < {MIN_DURATION_MS}ms) - cut-off speech like 'hel-' may confuse agent")
+            # Still send it, but log the warning
+        
         live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
         message_count += 1
         print(f"[CLIENT TO AGENT]: audio/pcm: {len(decoded_data)} bytes")

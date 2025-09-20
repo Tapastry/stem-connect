@@ -8,6 +8,12 @@ import "./src/env.js";
 const config = {
   // Fix the lockfile warning by setting the correct root
   outputFileTracingRoot: "/home/carlos/Development/stem-connect",
+  // Enable long-running API routes for SSE
+  serverExternalPackages: [],
+  // Increase timeout for SSE connections
+  serverRuntimeConfig: {
+    maxRequestTimeout: 300000, // 5 minutes
+  },
 };
 
 export default config;
