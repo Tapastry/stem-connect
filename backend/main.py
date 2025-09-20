@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import adk
+import google.generativeai as genai
 import psycopg2
 import uvicorn
 from dotenv import load_dotenv
@@ -29,6 +30,14 @@ app = FastAPI(title="STEM Connect API", description="A FastAPI backend for STEM 
 # Initialize postgres database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
 db = psycopg2.connect(DATABASE_URL)
+
+# Initialize Google Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+else:
+    print("Warning: GEMINI_API_KEY not found in environment variables")
 
 # /**
 #  * APP INFORMATION
@@ -194,7 +203,89 @@ async def check_interview_completeness_endpoint(user_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Generate a Node with ADK, Insert to database, and return the node
+async def generate_life_events_with_ai(prior_nodes: List[Node], prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int) -> List[dict]:
+    """Generate a life event using Google Gemini AI."""
+    try:
+        # Build context from prior nodes
+        context_parts = []
+        if prior_nodes:
+            context_parts.append("Life story so far:")
+            for i, node in enumerate(prior_nodes):
+                context_parts.append(f"{i + 1}. {node.name}: {node.description}")
+
+        # Build the prompt
+        context_str = "\n".join(context_parts) if context_parts else "Starting a new life journey."
+
+        positivity_guidance = ""
+        if positivity >= 0:
+            if positivity <= 30:
+                positivity_guidance = "This should be a challenging or difficult life event."
+            elif positivity <= 70:
+                positivity_guidance = "This should be a neutral or mixed life event."
+            else:
+                positivity_guidance = "This should be a positive and favorable life event."
+
+        node_type_guidance = f"The event should be related to: {node_type}" if node_type else ""
+
+        ai_prompt = f"""
+        {context_str}
+        
+        Generate {num_nodes} different realistic life events that could happen {time_in_months} months from the current situation. 
+        Make each event unique and diverse - they should represent different possible paths or choices.
+        
+        {positivity_guidance}
+        {node_type_guidance}
+        
+        User's additional context: {prompt}
+        
+        Please respond with a JSON array containing {num_nodes} objects, each with:
+        - "name": A short name for this life event (2-4 words)
+        - "title": A descriptive title (5-10 words)  
+        - "description": A detailed description (2-3 sentences)
+        - "type": The category of this event (career, relationship, health, education, etc.)
+        
+        Make each event unique and realistic. They should represent different possible life directions or choices.
+        Example format: [{{"name": "Career Change", "title": "Switched to Data Science", "description": "...", "type": "career"}}, ...]
+        """
+
+        if GEMINI_API_KEY:
+            response = model.generate_content(ai_prompt)
+            # Try to parse JSON from the response
+            try:
+                # Extract JSON array from the response text
+                response_text = response.text
+                # Find JSON array in the response (might be wrapped in markdown)
+                start_idx = response_text.find("[")
+                end_idx = response_text.rfind("]") + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    events = json.loads(json_str)
+                    # Ensure we have the right number of events
+                    if len(events) >= num_nodes:
+                        return events[:num_nodes]
+                    else:
+                        # Pad with fallback events if not enough generated
+                        while len(events) < num_nodes:
+                            events.append({"name": f"Event {len(events) + 1}", "title": f"Generated Life Event {len(events) + 1}", "description": f"A life event that occurs {time_in_months} months from now.", "type": "generated"})
+                        return events
+                else:
+                    raise ValueError("No JSON array found in response")
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"Failed to parse AI response as JSON: {e}")
+                print(f"AI Response: {response.text}")
+                # Fallback to generating multiple basic events
+                return [{"name": f"AI Event {i + 1}", "title": f"AI Generated Event {i + 1}", "description": f"Part of AI response: {response.text[i * 50 : (i + 1) * 50]}..." if i * 50 < len(response.text) else f"Generated event {i + 1}", "type": "ai-generated"} for i in range(num_nodes)]
+        else:
+            # Fallback when no API key - generate multiple events
+            return [{"name": f"Event {i + 1}", "title": f"Generated Life Event {i + 1}", "description": f"A life event that occurs {time_in_months} months from now.", "type": "generated"} for i in range(num_nodes)]
+
+    except Exception as e:
+        print(f"AI generation error: {e}")
+        # Fallback to basic generation - generate multiple events
+        return [{"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": f"A significant life event occurring {time_in_months} months from the current situation.", "type": "fallback"} for i in range(num_nodes)]
+
+
+# Generate a Node with AI, Insert to database, and return the node
 @app.post("/api/add-node")
 async def add_node(request: AddNodeRequest):
     try:
@@ -203,18 +294,25 @@ async def add_node(request: AddNodeRequest):
         return_nodes = []
         links = []
 
-        for i in range(request.num_nodes):
-            name = f"Node {len(prior_nodes) + i + 1}"
-            description = f"This is a description of node {len(prior_nodes) + i + 1}"
-            type = "node"
-            image_name = "node.png"
-            time = str(request.time_in_months) + " months"
-            title = "Node Title" + str(len(prior_nodes) + i + 1)
+        # Generate all nodes at once with AI for diversity
+        ai_events = await generate_life_events_with_ai(prior_nodes, request.prompt, request.node_type, request.time_in_months, request.positivity, request.num_nodes)
+
+        for i, ai_content in enumerate(ai_events):
             created_at = datetime.now()
             user_id = request.user_id
-            # Create unique ID using timestamp and random string to avoid duplicates
-            unique_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.choice(string.ascii_letters)}{random.choice(string.ascii_letters)}-{i}"
-            new_node = Node(id=unique_id, name=name, description=description, type=type, image_name=image_name, time=time, title=title, created_at=created_at, user_id=user_id)
+
+            # Create readable ID from AI-generated name (max 3-4 words)
+            name_words = ai_content["name"].split()[:3]  # Take first 3 words max
+            readable_id = " ".join(name_words)
+
+            # Add suffix if ID already exists to ensure uniqueness
+            base_id = readable_id
+            counter = 1
+            while any(node.id == readable_id for node in return_nodes):
+                readable_id = f"{base_id} {counter}"
+                counter += 1
+
+            new_node = Node(id=readable_id, name=ai_content["name"], description=ai_content["description"], type=ai_content["type"], image_name="", time=f"{request.time_in_months} months", title=ai_content["title"], created_at=created_at, user_id=user_id)
             return_nodes.append(new_node)
 
         # create links from the clicked node to all new nodes

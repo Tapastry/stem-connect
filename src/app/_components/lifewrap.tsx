@@ -70,14 +70,14 @@ const onNodeClick = async (
     const frontendNode = currentNodes.find((n) => n.id === nodeId);
     return {
       id: nodeId,
-      name: nodeId, // Use id as name for now
-      description: `Life event: ${nodeId}`,
-      type: "life-event",
-      image_name: "",
-      time: new Date().toISOString(),
-      title: nodeId,
-      created_at: new Date().toISOString(),
-      user_id: user.id || "anonymous",
+      name: frontendNode?.name || nodeId,
+      description: frontendNode?.description || `Life event: ${nodeId}`,
+      type: frontendNode?.type || "life-event",
+      image_name: frontendNode?.imageName || "",
+      time: frontendNode?.time || new Date().toISOString(),
+      title: frontendNode?.title || nodeId,
+      created_at: frontendNode?.createdAt || new Date().toISOString(),
+      user_id: frontendNode?.userId || user.id || "anonymous",
     };
   });
 

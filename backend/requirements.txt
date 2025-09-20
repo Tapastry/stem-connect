@@ -4,3 +4,4 @@ pydantic
 python-dotenv
 google-adk
 psycopg2-binary
+google-generativeai
