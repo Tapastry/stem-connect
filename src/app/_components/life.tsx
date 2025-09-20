@@ -1,7 +1,14 @@
 "use client";
 
 import type { User } from "next-auth";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import ForceGraph from "react-force-graph-3d";
 import * as THREE from "three";
 import SpriteText from "three-spritetext";
@@ -40,6 +47,7 @@ interface LifeProps {
   nodes: Node[];
   links: Link[];
   handleNodeClick: (nodeId: string) => void;
+  fgRef: RefObject<any>;
 }
 
 export default function Life({
@@ -48,9 +56,9 @@ export default function Life({
   nodes,
   links,
   handleNodeClick,
+  fgRef,
 }: LifeProps) {
   const [isMounted, setIsMounted] = useState(false);
-  const fgRef = useRef<any>({});
   const highlightRef = useRef<string[]>([]);
   const hoverRef = useRef<string>("");
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -65,13 +73,21 @@ export default function Life({
   // Memoize node colors to prevent them from changing on hover
   const nodeColors = useMemo(() => {
     const colors: { [nodeId: string]: string } = {};
-    nodes.forEach((node) => {
-      if (node.id === "Now") {
-        colors[node.id] = "yellow";
-      } else {
-        const hasOutgoingLinks = links.some((link) => link.source === node.id);
-        colors[node.id] = hasOutgoingLinks ? "red" : "green";
+    const map = new Map<string, string[]>();
+    links.forEach((link: any) => {
+      const s = typeof link.source == "object" ? link.source.id : link.source;
+      const t = typeof link.target == "object" ? link.target.id : link.target;
+      map.set(s, [t, ...(map.get(s) ?? [])]);
+    });
+
+    console.log("LINKS: ", map);
+    nodes.forEach((node: Node) => {
+      if (node.id == "Now") {
+        colors[node.id] = "red";
+        return;
       }
+      if (map.has(node.id)) colors[node.id] = "yellow";
+      else colors[node.id] = "green";
     });
     console.log("Calculated node colors:", colors);
     return colors;
@@ -110,7 +126,6 @@ export default function Life({
           width={size.width}
           height={size.height}
           graphData={graphData}
-          key={`graph-${nodes.length}-${links.length}`}
           onNodeClick={(node: any, event: any) => {
             console.log("Node clicked in ForceGraph:", node.id, node);
             console.log("Shift key held:", event?.shiftKey);

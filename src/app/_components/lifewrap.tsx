@@ -1,6 +1,6 @@
 "use client";
 import type { User } from "next-auth";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ConfigPanel from "./configpanel";
 import Life from "./life";
 
@@ -173,6 +173,7 @@ export default function LifeWrap({ user }: { user: User }) {
     })),
   );
   const [highlightedPath, setHighlightedPathState] = useState<string[]>([]);
+  const fgRef = useRef<any>(null);
 
   useEffect(() => {
     console.log("IN LIFEWRAP", highlightedPath);
@@ -239,7 +240,7 @@ export default function LifeWrap({ user }: { user: User }) {
           setHighlightedPath={setHighlightedPathState}
           nodes={nodes}
           links={links}
-          handleNodeClick={(nodeId: string) =>
+          handleNodeClick={(nodeId: string) => {
             onNodeClick(
               nodeId,
               highlightedPath,
@@ -248,8 +249,11 @@ export default function LifeWrap({ user }: { user: User }) {
               links,
               setNodes,
               setLinks,
-            )
-          }
+            );
+            fgRef.current.d3Force("charge").strength(-300);
+            fgRef.current.d3Force("link").distance(200);
+          }}
+          fgRef={fgRef}
         />
       </div>
     </div>
