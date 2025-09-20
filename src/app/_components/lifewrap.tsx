@@ -2,7 +2,6 @@
 import type { User } from "next-auth";
 import { useEffect, useState } from "react";
 import ConfigPanel from "./configpanel";
-import { nodes } from "~/server/db/schema";
 import Life from "./life";
 
 interface Node {
@@ -248,12 +247,17 @@ export default function LifeWrap({ user }: { user: User }) {
 
   return (
     <div className="flex h-screen w-screen">
-      <div className="flex h-full w-1/3 flex-col">
-        <div className="flex w-full border-2 border-gray-500 bg-black">
+      <div className="flex h-full w-1/3 flex-col border border-gray-700 bg-gray-900 shadow-lg shadow-indigo-500/10">
+        {/* Tab Navigation */}
+        <div className="flex w-full border-b border-gray-700 bg-gray-800 p-4">
           {types.map((type, idx) => (
             <button
               key={idx}
-              className={`h-12 flex-1 ${screen == type.type ? "bg-gray-500" : "bg-black"} text-center text-white transition hover:bg-gray-800`}
+              className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-150 ${
+                screen === type.type
+                  ? "border-b-2 border-indigo-500 bg-gray-600 text-white"
+                  : "bg-gray-800 text-gray-400 hover:text-gray-300"
+              }`}
               onClick={() => setScreen(type.type)}
             >
               {type.name}
@@ -261,16 +265,38 @@ export default function LifeWrap({ user }: { user: User }) {
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto bg-neutral-900 p-3">
-          {screen == "graph" ? (
-            <ConfigPanel
-              config={config}
-              setConfig={setConfig}
-              onGenerate={() => 1}
-              onReset={() => 1}
-            />
+        {/* Tab Content */}
+        <div className="flex-1 overflow-hidden p-4">
+          {screen === "graph" ? (
+            <div className="h-full">
+              <ConfigPanel
+                config={config}
+                setConfig={setConfig}
+                onGenerate={() => 1}
+                onReset={() => 1}
+              />
+            </div>
           ) : (
-            <></>
+            <div className="flex h-full w-full flex-col gap-4 p-4">
+              <div className="text-center">
+                <h1 className="text-xl font-bold text-white">Node View</h1>
+                <p className="text-sm text-gray-400">
+                  Manage individual nodes and connections
+                </p>
+              </div>
+
+              <div className="flex flex-1 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 p-8">
+                <div className="text-center">
+                  <div className="mb-4 text-4xl text-gray-600">🔧</div>
+                  <h3 className="mb-2 text-lg font-medium text-gray-300">
+                    Coming Soon
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Node editing and management features will be available here
+                  </p>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

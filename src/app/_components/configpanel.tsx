@@ -17,23 +17,6 @@ interface ConfigPanelProps {
   onReset?: () => void;
 }
 
-// A custom SVG component for the search icon to keep the JSX clean.
-const SearchIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    className="h-5 w-5"
-    viewBox="0 0 20 20"
-    fill="currentColor"
-  >
-    <path
-      fillRule="evenodd"
-      d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
-
-// The main control panel component.
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
   setConfig,
@@ -120,7 +103,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       </style>
 
       {/* Control Panel Component */}
-      <div className="flex min-h-full w-full flex-col gap-4 border border-gray-700 bg-gray-900 p-4 font-sans shadow-lg shadow-indigo-500/10">
+      <div className="flex h-full w-full flex-col gap-4 bg-gray-900 font-sans">
         {/* Header */}
         <div className="text-center">
           <h1 className="text-xl font-bold text-white">Life Graph Console</h1>
@@ -148,9 +131,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }
               className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
             />
-            <button className="shrink-0 rounded-md bg-indigo-600 p-2 text-white transition-colors duration-150 hover:bg-indigo-500">
-              <SearchIcon />
-            </button>
           </div>
         </div>
 
@@ -290,22 +270,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               {getSelectedNodeTypes().length !== 1 ? "s" : ""}
             </div>
           )}
-        </div>
-
-        {/* Action Buttons */}
-        <div className="mt-auto flex flex-col gap-2 pt-2">
-          <button
-            onClick={handleGenerateClick}
-            className="w-full rounded-lg bg-green-600 py-2.5 font-semibold text-white shadow-md transition-colors duration-150 hover:bg-green-500"
-          >
-            Generate Life Graph
-          </button>
-          <button
-            onClick={handleResetClick}
-            className="w-full rounded-lg bg-gray-700 py-2 font-medium text-gray-300 transition-colors duration-150 hover:bg-gray-600 hover:text-white"
-          >
-            Reset
-          </button>
         </div>
       </div>
     </>
