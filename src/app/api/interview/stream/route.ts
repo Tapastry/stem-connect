@@ -3,6 +3,7 @@ import { auth } from "~/server/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 300; // 5 minutes for long SSE connections
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,18 +24,32 @@ export async function GET(request: NextRequest) {
     console.log(`Proxying SSE request for user ${userId} to ${backendUrl} (audio: ${isAudio})`);
 
     // Retry logic for 404 errors (session might not be ready yet)
-    let backendResponse;
+    let backendResponse: Response | undefined;
     let retryCount = 0;
     const maxRetries = 5;
 
     while (retryCount < maxRetries) {
-      backendResponse = await fetch(backendUrl, {
-        method: "GET",
-        headers: {
-          "Accept": "text/event-stream",
-          "Cache-Control": "no-cache",
-        },
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+      
+      try {
+        backendResponse = await fetch(backendUrl, {
+          method: "GET",
+          headers: {
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if ((error as Error).name === 'AbortError') {
+          console.error("Backend request timed out");
+          return new Response("Request timeout", { status: 408 });
+        }
+        throw error;
+      }
 
       if (backendResponse.ok) {
         break;
@@ -50,6 +65,10 @@ export async function GET(request: NextRequest) {
       console.error(`Backend error for SSE stream: ${backendResponse.status} ${backendResponse.statusText}`);
       const text = await backendResponse.text();
       return new Response(text, { status: backendResponse.status });
+    }
+
+    if (!backendResponse) {
+      return new Response("Failed to connect to backend after retries", { status: 503 });
     }
 
     return new Response(backendResponse.body, {

@@ -9,6 +9,13 @@ interface PCMVoiceRecorderProps {
   disabled?: boolean;
 }
 
+interface AudioQualityResult {
+  isValid: boolean;
+  reason?: string;
+  durationMs: number;
+  avgEnergy: number;
+}
+
 export default function PCMVoiceRecorder({ 
   onAudioData, 
   isConnected, 
@@ -88,15 +95,17 @@ export default function PCMVoiceRecorder({
           }
           
           // Voice activity detection for auto-sending only (not for collection)
-          const VOICE_THRESHOLD = 2; // Moderate threshold
-          const SILENCE_MS = 3000; // Require ~3 seconds of silence before auto-send
-          const MIN_DURATION_MS = 1000; // Minimum 1s total duration before sending
+          const VOICE_THRESHOLD = 3; // Higher threshold to avoid false positives
+          const SILENCE_MS = 5000; // Require 5 seconds of silence before auto-send (more natural)
+          const MIN_DURATION_MS = 2000; // Minimum 2s total duration before sending
           
           const nowTs = Date.now();
           if (normalizedLevel > VOICE_THRESHOLD) {
             // Voice detected
+            console.log(`🎤 Voice detected: level ${normalizedLevel.toFixed(2)} > ${VOICE_THRESHOLD}`);
             lastVoiceTsRef.current = nowTs;
             if (!isCollectingRef.current) {
+              console.log(`🎙️ Starting audio collection`);
               isCollectingRef.current = true;
               collectStartTimeRef.current = nowTs;
               setIsCollecting(true);
@@ -114,7 +123,11 @@ export default function PCMVoiceRecorder({
             // If enough silence time and min duration reached, send
             const sinceVoiceMs = nowTs - (lastVoiceTsRef.current || nowTs);
             const collectDuration = nowTs - collectStartTimeRef.current;
+            
+            console.log(`🔇 Silence detected: ${sinceVoiceMs}ms since voice, ${collectDuration}ms total duration`);
+            
             if (sinceVoiceMs >= SILENCE_MS && collectDuration >= MIN_DURATION_MS) {
+              console.log(`📤 AUTO-SENDING: Silence threshold reached (${sinceVoiceMs}ms >= ${SILENCE_MS}ms)`);
               sendBufferedAudio();
               resetBuffer();
             }
@@ -182,6 +195,44 @@ export default function PCMVoiceRecorder({
     }
   };
   
+  const validateAudioQuality = (audioData: Int16Array): AudioQualityResult => {
+    const durationMs = Math.round(audioData.length / 16000 * 1000);
+    
+    // Calculate audio energy to detect if it's meaningful speech
+    let totalEnergy = 0;
+    for (let i = 0; i < audioData.length; i++) {
+      totalEnergy += Math.abs(audioData[i]);
+    }
+    const avgEnergy = totalEnergy / audioData.length;
+    
+    const MIN_AUDIO_DURATION = 800; // 800ms for complete words
+    const MIN_ENERGY = 100; // Minimum average energy for meaningful speech
+    
+    if (durationMs < MIN_AUDIO_DURATION) {
+      return {
+        isValid: false,
+        reason: `Too short (${durationMs}ms < ${MIN_AUDIO_DURATION}ms) - likely cut-off speech`,
+        durationMs,
+        avgEnergy
+      };
+    }
+    
+    if (avgEnergy < MIN_ENERGY) {
+      return {
+        isValid: false,
+        reason: `Too quiet (energy: ${avgEnergy.toFixed(1)} < ${MIN_ENERGY}) - likely incomplete speech`,
+        durationMs,
+        avgEnergy
+      };
+    }
+    
+    return {
+      isValid: true,
+      durationMs,
+      avgEnergy
+    };
+  };
+
   const sendCurrentBuffer = () => {
     if (audioBufferRef.current.length === 0) return;
     
@@ -195,11 +246,28 @@ export default function PCMVoiceRecorder({
       offset += chunk.length;
     }
     
-    // Send the complete audio segment with placeholder transcription
+    // Check audio quality for logging, but always send the audio
+    const qualityCheck = validateAudioQuality(combinedAudio);
+    
+    if (!qualityCheck.isValid) {
+      // Silently discard without user notification - this prevents agent from getting stuck
+      console.log(`🗑️ Silently discarding problematic audio: ${qualityCheck.reason}`);
+      
+      // Reset buffer without sending - user doesn't need to know
+      audioBufferRef.current = [];
+      silenceCountRef.current = 0;
+      isCollectingRef.current = false;
+      collectStartTimeRef.current = 0;
+      setIsCollecting(false);
+      setBufferLength(0);
+      return;
+    }
+    
+    // Send good quality audio
     const base64Data = btoa(String.fromCharCode(...new Uint8Array(combinedAudio.buffer)));
-    const transcription = `[Voice message - ${Math.round(combinedAudio.length / 16000 * 1000)}ms]`;
+    const transcription = `[Voice message - ${qualityCheck.durationMs}ms]`;
     onAudioData(base64Data, "audio/pcm", transcription);
-    console.log(`📤 Manually sent audio segment: ${combinedAudio.length} samples`);
+    console.log(`📤 Sent audio segment: ${combinedAudio.length} samples (${qualityCheck.durationMs}ms)`);
     
     // Reset buffer
     audioBufferRef.current = [];
@@ -223,6 +291,7 @@ export default function PCMVoiceRecorder({
 
   // Stop recording when disabled
   useEffect(() => {
+    console.log(`🎛️ PCMVoiceRecorder disabled state changed: ${disabled}, isRecording: ${isRecording}`);
     if (disabled && isRecording) {
       console.log("🛑 Stopping recording because component was disabled");
       stopRecording();
