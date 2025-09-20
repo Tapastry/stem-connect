@@ -64,11 +64,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   };
 
   const handleResetClick = () => {
+    // Enable all node types by default
+    const allNodeTypeIds = nodeTypes.map((nt) => nt.id).join(",");
+
     setConfig({
       prompt: "",
       positivity: -1,
       time_in_months: -1,
-      type: "",
+      type: allNodeTypeIds,
       num_nodes: 1,
     });
     if (onReset) {
@@ -112,28 +115,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
           </p>
         </div>
 
-        {/* Main Prompt Input */}
-        <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
-          <label htmlFor="prompt" className="text-sm font-medium text-gray-300">
-            Life Event Prompt
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              id="prompt"
-              type="text"
-              placeholder="e.g., 'My career transition into tech'"
-              value={config.prompt}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setConfig((prev: Config) => ({
-                  ...prev,
-                  prompt: e.target.value,
-                }))
-              }
-              className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-        </div>
-
         {/* Parameter Controls */}
         <div className="flex flex-col gap-4 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
           <h2 className="text-sm font-medium text-gray-300">
@@ -154,7 +135,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               id="num_nodes"
               type="range"
               min="1"
-              max="10"
+              max="5"
               value={config.num_nodes}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 setConfig((prev: Config) => ({
@@ -294,6 +275,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               {getSelectedNodeTypes().length !== 1 ? "s" : ""}
             </div>
           )}
+        </div>
+
+        {/* Prompt Input */}
+        <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+          <label htmlFor="prompt" className="text-sm font-medium text-gray-300">
+            Additional Context
+          </label>
+          <input
+            id="prompt"
+            type="text"
+            placeholder="e.g., 'Focus on remote work opportunities'"
+            value={config.prompt}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setConfig((prev: Config) => ({
+                ...prev,
+                prompt: e.target.value,
+              }))
+            }
+            className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+          />
         </div>
       </div>
     </>

@@ -324,12 +324,18 @@ const onNodeViewClick = (
 };
 
 export default function LifeWrap({ user }: { user: User }) {
-  const [config, setConfig] = useState({
-    prompt: "",
-    positivity: -1,
-    time_in_months: -1,
-    type: "",
-    num_nodes: 1,
+  const [config, setConfig] = useState(() => {
+    // Import nodeTypes to get all IDs
+    const { nodeTypes } = require("../../consts/consts");
+    const allNodeTypeIds = nodeTypes.map((nt: any) => nt.id).join(",");
+
+    return {
+      prompt: "",
+      positivity: -1,
+      time_in_months: -1,
+      type: allNodeTypeIds,
+      num_nodes: 1,
+    };
   });
   const types = [
     { type: "graph", name: "Graph Settings" },
@@ -502,6 +508,29 @@ export default function LifeWrap({ user }: { user: User }) {
                     ? `Viewing path with ${nodesToView.length} nodes`
                     : "Click a node to view its path to the root"}
                 </p>
+              </div>
+
+              {/* Prompt Input for Node View */}
+              <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+                <label
+                  htmlFor="node-prompt"
+                  className="text-sm font-medium text-gray-300"
+                >
+                  Additional Context
+                </label>
+                <input
+                  id="node-prompt"
+                  type="text"
+                  placeholder="e.g., 'Focus on remote work opportunities'"
+                  value={config.prompt}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      prompt: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
 
               {nodesToView.length > 0 ? (
