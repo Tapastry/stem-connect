@@ -12,7 +12,9 @@ from .base import Node, PersonalInformation
 class AddNodeRequest(BaseModel):
     """Request model for adding new nodes."""
 
+    user_id: str
     previous_nodes: List[Node]
+    clicked_node_id: str
     prompt: str
     num_nodes: int
     time_in_months: int

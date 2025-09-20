@@ -39,6 +39,7 @@ const initialLinks: Link[] = [];
 const onNodeClick = async (
   clickedNodeId: string,
   currentPath: string[],
+  user: User,
   config: Config,
   currentNodes: Node[],
   currentLinks: Link[],
@@ -54,11 +55,26 @@ const onNodeClick = async (
     return;
   }
 
-  // Convert frontend nodes to backend format (only id field)
-  const backendNodes = currentPath.map((node) => ({ id: node }));
+  // Convert frontend nodes to backend format with all required fields
+  const backendNodes = currentPath.map((nodeId) => {
+    const frontendNode = currentNodes.find((n) => n.id === nodeId);
+    return {
+      id: nodeId,
+      name: nodeId, // Use id as name for now
+      description: `Life event: ${nodeId}`,
+      type: "life-event",
+      image_name: "",
+      time: new Date().toISOString(),
+      title: nodeId,
+      created_at: new Date().toISOString(),
+      user_id: user.id || "anonymous",
+    };
+  });
 
   const request = {
+    user_id: user.id,
     previous_nodes: backendNodes,
+    clicked_node_id: clickedNodeId,
     prompt: config.prompt,
     num_nodes: config.num_nodes,
     time_in_months: config.time_in_months,
@@ -151,33 +167,116 @@ export default function LifeWrap({ user }: { user: User }) {
     { type: "node", name: "Node View" },
   ];
   const [screen, setScreen] = useState("graph");
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [nodes, setNodes] = useState<Node[]>(
-    initialNodes.map((node) => ({
-      id: node.id,
-      x: node.x,
-      y: node.y,
-      z: node.z,
-      color: node.color,
-      ...(node.fx !== undefined && { fx: node.fx }),
-      ...(node.fy !== undefined && { fy: node.fy }),
-      ...(node.fz !== undefined && { fz: node.fz }),
-    })),
-  );
-
-  const [links, setLinks] = useState<Link[]>(
-    initialLinks.map((link) => ({
-      id: `${link.source}-${link.target}`,
-      source: link.source,
-      target: link.target,
-    })),
-  );
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [links, setLinks] = useState<Link[]>([]);
   const [highlightedPath, setHighlightedPathState] = useState<string[]>([]);
   const fgRef = useRef<any>(null);
+
+  // Load graph data from database on mount
+  useEffect(() => {
+    const loadGraphData = async () => {
+      try {
+        // First, ensure the "You" node exists
+        await fetch(`http://localhost:8000/api/instantiate/${user.id}`, {
+          method: "POST",
+        });
+
+        // Then load all graph data
+        const response = await fetch(
+          `http://localhost:8000/api/get-graph/${user.id}`,
+        );
+
+        if (!response.ok) {
+          console.error("Failed to load graph data:", response.status);
+          // If no data exists, start with initial "You" node
+          setNodes([
+            {
+              id: "You",
+              x: 0,
+              y: 0,
+              z: 0,
+              color: "yellow",
+              fx: 0,
+              fy: 0,
+              fz: 0,
+            },
+          ]);
+          setLinks([]);
+          setIsLoading(false);
+          return;
+        }
+
+        const graphData = await response.json();
+        console.log("Loaded graph data:", graphData);
+
+        // Convert database nodes to frontend format
+        const frontendNodes: Node[] = graphData.nodes.map((dbNode: any) => ({
+          id: dbNode.id,
+          x: Math.random() * 10 - 5, // Random positioning for now
+          y: Math.random() * 10 - 5,
+          z: Math.random() * 10 - 5,
+          color:
+            dbNode.id === "Now"
+              ? "yellow"
+              : `hsl(${Math.random() * 360}, 70%, 60%)`,
+          ...(dbNode.id === "Now" && { fx: 0, fy: 0, fz: 0 }), // Fix "Now" at center
+        }));
+
+        // Convert database links to frontend format
+        const frontendLinks: Link[] = graphData.links.map((dbLink: any) => ({
+          id: dbLink.id,
+          source: dbLink.source,
+          target: dbLink.target,
+          timeInMonths: 1, // Default for now, could be stored in DB later
+        }));
+
+        setNodes(frontendNodes);
+        setLinks(frontendLinks);
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Error loading graph data:", error);
+        // Fallback to initial state
+        setNodes(
+          initialNodes.map((node) => ({
+            id: node.id,
+            x: node.x,
+            y: node.y,
+            z: node.z,
+            color: node.color,
+            ...(node.fx !== undefined && { fx: node.fx }),
+            ...(node.fy !== undefined && { fy: node.fy }),
+            ...(node.fz !== undefined && { fz: node.fz }),
+          })),
+        );
+        setLinks([]);
+        setIsLoading(false);
+      }
+    };
+
+    loadGraphData();
+  }, [user.id]);
 
   useEffect(() => {
     console.log("IN LIFEWRAP", highlightedPath);
   }, [highlightedPath]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="mb-4 text-4xl text-indigo-500">🔄</div>
+          <h2 className="mb-2 text-xl font-bold text-white">
+            Loading Your Life Graph
+          </h2>
+          <p className="text-gray-400">
+            Fetching your nodes and connections...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen">
@@ -244,6 +343,7 @@ export default function LifeWrap({ user }: { user: User }) {
             onNodeClick(
               nodeId,
               highlightedPath,
+              user,
               config,
               nodes,
               links,

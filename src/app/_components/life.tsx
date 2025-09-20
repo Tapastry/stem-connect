@@ -204,8 +204,8 @@ export default function Life({
             return group;
           }}
           nodeVal={(node) => (node.id === "Now" ? 50 : 4)}
-          d3AlphaDecay={0.01}
-          d3VelocityDecay={0.3}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.6}
           enableNodeDrag={true}
           onNodeDrag={(node) => {
             // Prevent dragging of "Now" node only
@@ -265,6 +265,13 @@ export default function Life({
               nowNode.fx = 0;
               nowNode.fy = 0;
               nowNode.fz = 0;
+            }
+          }}
+          onEngineStart={() => {
+            // Set initial physics parameters for stability
+            if (fgRef.current) {
+              fgRef.current.d3Force("charge").strength(-50);
+              fgRef.current.d3Force("center", null);
             }
           }}
         />
