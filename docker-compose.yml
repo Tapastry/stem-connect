@@ -8,3 +8,26 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: mysecretpassword
       POSTGRES_DB: stem-connect
+
+  minio:
+    image: 'quay.io/minio/minio:RELEASE.2024-01-16T16-07-38Z'
+    restart: always
+    ports:
+      - "9000:9000"  # API port
+      - "9001:9001"  # Console port
+    environment:
+      MINIO_SERVER_URL: "http://localhost:9000"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:9001"
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    command: 'server /data --console-address ":9001"'
+    healthcheck:
+      test:
+        - CMD
+        - mc
+        - ready
+        - local
+      interval: 5s
+      timeout: 20s
+      retries: 10
+

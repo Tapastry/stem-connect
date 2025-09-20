@@ -26,7 +26,10 @@
     "@trpc/client": "^11.0.0",
     "@trpc/react-query": "^11.0.0",
     "@trpc/server": "^11.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "drizzle-orm": "^0.41.0",
+    "lucide-react": "^0.544.0",
     "next": "^15.2.3",
     "next-auth": "5.0.0-beta.25",
     "postgres": "^3.4.4",
@@ -35,6 +38,7 @@
     "react-force-graph-3d": "^1.29.0",
     "server-only": "^0.0.1",
     "superjson": "^2.2.1",
+    "tailwind-merge": "^3.3.1",
     "three-spritetext": "^1.10.0",
     "zod": "^3.24.2"
   },
@@ -52,6 +56,7 @@
     "prettier": "^3.5.3",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "tailwindcss": "^4.0.15",
+    "tw-animate-css": "^1.3.8",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.27.0"
   },

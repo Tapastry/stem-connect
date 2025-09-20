@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { auth } from "~/server/auth";
 import Life from "../_components/life";
 
@@ -20,13 +19,7 @@ export default async function LifePage() {
 
   return (
     <div>
-      <div>Hi, {session.user.name}</div>
-      <div>
-        <Link href="/">Home</Link>
-      </div>
-      <div>
-        <Life user={session.user} />
-      </div>
+      <Life user={session.user} />
     </div>
   );
 }

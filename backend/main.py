@@ -1,12 +1,22 @@
 import os
+import uuid
+from dataclasses import Field
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+import adk
+import psycopg2
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(title="STEM Connect API", description="A FastAPI backend for STEM Connect application", version="1.0.0", docs_url="/docs", redoc_url="/redoc")
@@ -23,152 +33,193 @@ app.add_middleware(
 # Security
 security = HTTPBearer()
 
+nodes_db: Dict[str, dict] = {}
+
 
 # Pydantic models
-class UserResponse(BaseModel):
-    id: str
+class Node(BaseModel):
+    id: Optional[str] = None
     name: str
-    email: str
-    created_at: datetime
+    title: Optional[str] = None
+    type: str
+    imageName: Optional[str] = None
+    time: Optional[str] = None
+    description: Optional[str] = None
+    createdAt: Optional[datetime] = None
+    userId: str
 
 
-class PostCreate(BaseModel):
-    title: str
-    content: str
-    author_id: str
+class Link(BaseModel):
+    id: Optional[str] = None
+    source: str
+    target: str
+    userId: str
 
 
-class PostResponse(BaseModel):
+class PersonalInformation(BaseModel):
+    id: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    location: Optional[str] = None
+    interests: Optional[str] = None
+    skills: Optional[str] = None
+    name: str
+    title: Optional[str] = None
+    goal: Optional[str] = None
+    bio: Optional[str] = None
+    imageName: Optional[str] = None
+    userId: str
+
+
+class AddNodeRequest(BaseModel):
+    root: Node
+    num_nodes: int
+    edge_in_month: int
+    type: str
+    agent_type: Optional[str]
+
+
+class AddPersonalInformationRequest(BaseModel):
+    personalInformation: PersonalInformation
+
+
+class UpdatePersonalInformationRequest(BaseModel):
     id: str
-    title: str
-    content: str
-    author_id: str
-    created_at: datetime
+    personalInformation: PersonalInformation
 
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: datetime
-    version: str
+class NodeRequest(BaseModel):
+    id: str
+    agent_type: str = "interviewer_agent"
+    attached_nodes_ids: Optional[List[str]] = []
+
+class NodeResponse(BaseModel):
+    id: str
+    prompt: str
+    output: str
+    attached_node_ids: List[str]
 
 
-# In-memory storage (replace with database in production)
-users_db = {}
-posts_db = {}
-post_counter = 0
+# ADK Agent Endpoints
+@app.get("/adk/events/{user_id}")
+async def adk_events_endpoint(user_id: str, is_audio: str = "false"):
+    """SSE endpoint for agent-to-client communication."""
+    live_events, live_request_queue = await adk.start_agent_session(user_id, is_audio == "true")
 
+    def cleanup():
+        live_request_queue.close()
+        if user_id in adk.active_sessions:
+            del adk.active_sessions[user_id]
+        print(f"Client #{user_id} disconnected from SSE")
 
-# Dependency to get current user (mock implementation)
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    # In a real app, you'd validate the JWT token here
-    # For now, we'll just return a mock user
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    async def event_generator():
+        try:
+            async for data in adk.agent_to_client_sse(live_events):
+                yield data
+        except Exception as e:
+            print(f"Error in SSE stream: {e}")
+        finally:
+            cleanup()
 
-    # Mock user data - replace with actual JWT validation
-    return {"id": "user_123", "name": "John Doe", "email": "john@example.com"}
-
-
-# Root endpoint
-@app.get("/", response_model=dict)
-async def root():
-    return {"message": "Welcome to STEM Connect API", "docs": "/docs", "health": "/health"}
-
-
-# Health check endpoint
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    return HealthResponse(status="healthy", timestamp=datetime.now(), version="1.0.0")
-
-
-# User endpoints
-@app.get("/users/me", response_model=UserResponse)
-async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    return UserResponse(id=current_user["id"], name=current_user["name"], email=current_user["email"], created_at=datetime.now())
-
-
-# Post endpoints
-@app.get("/posts", response_model=List[PostResponse])
-async def get_posts(skip: int = 0, limit: int = 10):
-    """Get all posts with pagination"""
-    posts = list(posts_db.values())[skip : skip + limit]
-    return posts
-
-
-@app.post("/posts", response_model=PostResponse)
-async def create_post(post: PostCreate, current_user: dict = Depends(get_current_user)):
-    """Create a new post"""
-    global post_counter
-    post_counter += 1
-
-    new_post = PostResponse(id=f"post_{post_counter}", title=post.title, content=post.content, author_id=post.author_id, created_at=datetime.now())
-
-    posts_db[new_post.id] = new_post
-    return new_post
-
-
-@app.get("/posts/{post_id}", response_model=PostResponse)
-async def get_post(post_id: str):
-    """Get a specific post by ID"""
-    if post_id not in posts_db:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return posts_db[post_id]
-
-
-@app.delete("/posts/{post_id}")
-async def delete_post(post_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a post (only by author)"""
-    if post_id not in posts_db:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    post = posts_db[post_id]
-    if post.author_id != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this post")
-
-    del posts_db[post_id]
-    return {"message": "Post deleted successfully"}
-
-
-# STEM-specific endpoints
-@app.get("/stem/topics")
-async def get_stem_topics():
-    """Get available STEM topics"""
-    return {"topics": ["Mathematics", "Physics", "Chemistry", "Biology", "Computer Science", "Engineering", "Data Science", "Artificial Intelligence", "Robotics", "Environmental Science"]}
-
-
-@app.get("/stem/resources")
-async def get_stem_resources(topic: Optional[str] = None):
-    """Get STEM learning resources"""
-    resources = {
-        "Mathematics": [{"name": "Khan Academy Math", "url": "https://khanacademy.org/math", "type": "course"}, {"name": "3Blue1Brown", "url": "https://3blue1brown.com", "type": "video"}],
-        "Computer Science": [{"name": "freeCodeCamp", "url": "https://freecodecamp.org", "type": "course"}, {"name": "LeetCode", "url": "https://leetcode.com", "type": "practice"}],
-        "Physics": [{"name": "MIT OpenCourseWare", "url": "https://ocw.mit.edu", "type": "course"}, {"name": "Physics Girl", "url": "https://youtube.com/physicsgirl", "type": "video"}],
-    }
-
-    if topic and topic in resources:
-        return {"topic": topic, "resources": resources[topic]}
-
-    return {"resources": resources}
-
-
-# Error handlers
-@app.exception_handler(404)
-async def not_found_handler(request, exc):
-    return {"error": "Not found", "message": "The requested resource was not found"}
-
-
-@app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    return {"error": "Internal server error", "message": "Something went wrong"}
-
-
-# Run the application
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True,  # Enable auto-reload for development
-        log_level="info",
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
+
+
+@app.post("/adk/send/{user_id}")
+async def adk_send_message_endpoint(user_id: str, request: Request):
+    """HTTP endpoint for client-to-agent communication."""
+    try:
+        message = await request.json()
+        mime_type = message["mime_type"]
+        data = message["data"]
+
+        adk.send_message_to_agent(user_id, mime_type, data)
+        return {"status": "sent"}
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Generate a Node with ADK, Insert to database, and return the node
+@app.post("/api/add-node")
+async def add_node(request: AddNodeRequest):
+    try:
+        # Create a prompt for node generation based on the root node and parameters
+        prompt = f"""
+        Generate {request.num_nodes} life path decisions/scenarios based on this root node:
+        
+        Root Node: {request.root.name}
+        Description: {request.root.description or "No description provided"}
+        Type: {request.type}
+        Time frame: {request.edge_in_month} months
+        
+        Generate realistic life path options that branch from this point, considering the time frame and type specified.
+        Each option should be a distinct choice or scenario that could realistically happen.
+        """
+
+        # Use the new one-time session to generate nodes without chat history
+        generated_response = await adk.generate_node_response(prompt, request.agent_type)
+
+        # TODO: Parse the response and create actual nodes
+        # TODO: Insert nodes into database
+        # TODO: Return structured node data
+
+        return {"message": "Node generation completed", "generated_content": generated_response, "root_node": request.root.dict(), "parameters": {"num_nodes": request.num_nodes, "edge_in_month": request.edge_in_month, "type": request.type}}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")
+
+
+# Add user information gathered on interview screen to database
+@app.post("/api/add-personal-information")
+async def add_personal_information(request: AddPersonalInformationRequest):
+    # add personal information to database
+    return {"message": "Personal information added successfully (placeholder)"}
+
+
+# Update user information gathered on interview screen to database
+@app.put("/api/update-personal-information")
+async def update_personal_information(request: UpdatePersonalInformationRequest):
+    # update personal information in database
+    return {"message": "Personal information updated successfully (placeholder)"}
+
+
+# Get user information gathered on interview screen from database
+@app.get("/api/personal-information/{user_id}")
+async def get_personal_information(user_id: str):
+    # get personal information for user
+    return {"message": f"Personal information for user {user_id} (placeholder)"}
+
+
+# Get all nodes for user from database
+@app.get("/api/nodes/{user_id}")
+async def get_nodes(user_id: str):
+    # get all nodes for user
+    return {"message": f"Nodes for user {user_id} (placeholder)"}
+
+
+# Get all links for user from database
+@app.get("/api/links/{user_id}")
+async def get_links(user_id: str):
+    # get all links for user
+    return {"message": f"Links for user {user_id} (placeholder)"}
+
+
+# Get available AI agents
+@app.get("/api/agents")
+async def get_available_agents():
+    """Get a list of all available AI agents."""
+    try:
+        agents = adk.get_available_agents()
+        return {"agents": agents, "default": "interviewer_agent", "total": len(agents)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get agents: {str(e)}")
