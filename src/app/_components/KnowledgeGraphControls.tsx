@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 // A custom SVG component for the search icon to keep the JSX clean.
 const SearchIcon = () => (
