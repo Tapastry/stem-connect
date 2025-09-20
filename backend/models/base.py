@@ -28,6 +28,7 @@ class Link(BaseModel):
     id: Optional[str] = None
     source: str
     target: str
+    timeInMonths: Optional[int] = 1
     userId: str
 
 

@@ -204,12 +204,12 @@ async def add_node(request: AddNodeRequest):
         links = []
 
         for i in range(request.num_nodes):
-            name = f"Node {i + 1}"
-            description = f"This is a description of node {i + 1}"
+            name = f"Node {len(prior_nodes) + i + 1}"
+            description = f"This is a description of node {len(prior_nodes) + i + 1}"
             type = "node"
             image_name = "node.png"
-            time = "1 month"
-            title = "Node Title"
+            time = str(request.time_in_months) + " months"
+            title = "Node Title" + str(len(prior_nodes) + i + 1)
             created_at = datetime.now()
             user_id = request.user_id
             # Create unique ID using timestamp and random string to avoid duplicates
@@ -241,7 +241,7 @@ async def add_node(request: AddNodeRequest):
             # Now create links from clicked node to new nodes
             for new_node in return_nodes:
                 link_id = f"{clicked_node.id}-{new_node.id}-{request.user_id}"
-                links.append(Link(id=link_id, source=clicked_node.id, target=new_node.id, userId=request.user_id))
+                links.append(Link(id=link_id, source=clicked_node.id, target=new_node.id, timeInMonths=request.time_in_months, userId=request.user_id))
 
         # add the nodes to the database
         try:
@@ -260,11 +260,11 @@ async def add_node(request: AddNodeRequest):
                 for link in links:
                     cursor.execute(
                         """
-                        INSERT INTO "stem-connect_link" (id, source, target, "userId") 
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO "stem-connect_link" (id, source, target, "timeInMonths", "userId") 
+                        VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO NOTHING
                     """,
-                        (link.id, link.source, link.target, link.userId),
+                        (link.id, link.source, link.target, link.timeInMonths, link.userId),
                     )
 
                 db.commit()
@@ -299,7 +299,7 @@ async def get_graph(user_id: str):
             # Get all links for the user
             cursor.execute(
                 """
-                SELECT id, source, target, "userId"
+                SELECT id, source, target, "timeInMonths", "userId"
                 FROM "stem-connect_link" 
                 WHERE "userId" = %s
             """,
@@ -341,6 +341,10 @@ async def instantiate_user_node(user_id: str):
 async def delete_node(user_id: str, node_id: str):
     """Delete a node and all nodes that become unreachable from 'Now'."""
     try:
+        # Check if they are trying to delete the "You" node
+        if node_id == "You":
+            raise HTTPException(status_code=400, detail="Cannot delete the 'You' node")
+
         with db.cursor(cursor_factory=RealDictCursor) as cursor:
             # First, check if the node exists and belongs to the user
             cursor.execute(

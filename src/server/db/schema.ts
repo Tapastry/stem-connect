@@ -128,6 +128,7 @@ export const links = createTable("link", (d) => ({
     .varchar({ length: 255 })
     .notNull()
     .references(() => nodes.id),
+  timeInMonths: d.integer().default(1),
   userId: d
     .varchar({ length: 255 })
     .notNull()

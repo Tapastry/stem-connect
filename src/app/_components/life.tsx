@@ -17,6 +17,7 @@ import { createSimpleGraph } from "./pruned";
 
 interface Node {
   id: string;
+  // 3D positioning fields (frontend only)
   x: number;
   y: number;
   z: number;
@@ -24,6 +25,15 @@ interface Node {
   fx?: number;
   fy?: number;
   fz?: number;
+  // Backend data fields
+  name?: string;
+  title?: string;
+  type?: string;
+  imageName?: string;
+  time?: string;
+  description?: string;
+  createdAt?: string;
+  userId?: string;
 }
 
 interface Link {
@@ -48,6 +58,7 @@ interface LifeProps {
   links: Link[];
   handleNodeClick: (nodeId: string) => void;
   handleNodeDelete: (nodeId: string) => void;
+  handleNodeViewClick: (nodeId: string) => void;
   fgRef: RefObject<any>;
 }
 
@@ -58,6 +69,7 @@ export default function Life({
   links,
   handleNodeClick,
   handleNodeDelete,
+  handleNodeViewClick,
   fgRef,
 }: LifeProps) {
   const [isMounted, setIsMounted] = useState(false);
@@ -147,10 +159,8 @@ export default function Life({
               );
               handleNodeClick(node.id);
             } else {
-              console.log(
-                "Normal click: Will open info pane (not implemented yet)",
-              );
-              // TODO: Open info pane for this node
+              console.log("Normal click: Opening node view for", node.id);
+              handleNodeViewClick(node.id);
             }
           }}
           nodeThreeObjectExtend={false}
