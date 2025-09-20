@@ -213,22 +213,30 @@ export default function Life({ user: _user }: { user: User }) {
       nodeVal={(node) => (node.id === "Now" ? 50 : 4)}
       d3AlphaDecay={0.01}
       d3VelocityDecay={0.3}
-      enableNodeDrag={false}
+      enableNodeDrag={true}
       onNodeDrag={(node) => {
-        // Prevent dragging of "Now" node
+        // Prevent dragging of "Now" node only
         if (node.id === "Now") {
           node.fx = 0;
           node.fy = 0;
           node.fz = 0;
           return false;
         }
+        // Allow dragging for all other nodes
+        return true;
       }}
       onNodeDragEnd={(node) => {
-        // Ensure "Now" stays fixed after any drag attempt
+        // Keep "Now" fixed, but allow other nodes to be positioned
         if (node.id === "Now") {
           node.fx = 0;
           node.fy = 0;
           node.fz = 0;
+        } else {
+          // Optional: Fix other nodes in place after dragging
+          // Remove these lines if you want nodes to move freely after drag
+          // node.fx = node.x;
+          // node.fy = node.y;
+          // node.fz = node.z;
         }
       }}
       onEngineStop={() => {

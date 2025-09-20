@@ -178,6 +178,7 @@ async def add_node(request: AddNodeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")
 
+@app.post("/api/nodes", response_model=NodeResponse)
 
 # Add user information gathered on interview screen to database
 @app.post("/api/add-personal-information")
