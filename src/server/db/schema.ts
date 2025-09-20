@@ -10,27 +10,9 @@ import { type AdapterAccount } from "next-auth/adapters";
  */
 export const createTable = pgTableCreator((name) => `stem-connect_${name}`);
 
-export const posts = createTable(
-  "post",
-  (d) => ({
-    id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
-    name: d.varchar({ length: 256 }),
-    createdById: d
-      .varchar({ length: 255 })
-      .notNull()
-      .references(() => users.id),
-    createdAt: d
-      .timestamp({ withTimezone: true })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: d.timestamp({ withTimezone: true }).$onUpdate(() => new Date()),
-  }),
-  (t) => [
-    index("created_by_idx").on(t.createdById),
-    index("name_idx").on(t.name),
-  ],
-);
-
+/**
+ * AUTH INFORMATION
+ */
 export const users = createTable("user", (d) => ({
   id: d
     .varchar({ length: 255 })
@@ -76,10 +58,6 @@ export const accounts = createTable(
   ],
 );
 
-export const accountsRelations = relations(accounts, ({ one }) => ({
-  user: one(users, { fields: [accounts.userId], references: [users.id] }),
-}));
-
 export const sessions = createTable(
   "session",
   (d) => ({
@@ -106,3 +84,37 @@ export const verificationTokens = createTable(
   }),
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
 );
+
+/**
+ * APP INFORMATION
+ */
+
+export const nodes = createTable("node", (d) => ({
+  id: d.varchar({ length: 255 }).notNull().primaryKey(),
+  name: d.varchar({ length: 255 }).notNull(),
+  title: d.varchar({ length: 255 }),
+  type: d.varchar({ length: 255 }).notNull(),
+  imageName: d.varchar({ length: 255 }),
+  time: d.text(),
+  description: d.text(),
+  createdAt: d
+    .timestamp({ mode: "date", withTimezone: true })
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+}));
+
+export const nodesRelations = relations(nodes, ({ many }) => ({
+  links: many(links),
+}));
+
+export const links = createTable("link", (d) => ({
+  id: d.varchar({ length: 255 }).notNull().primaryKey(),
+  source: d
+    .varchar({ length: 255 })
+    .notNull()
+    .references(() => nodes.id),
+  target: d
+    .varchar({ length: 255 })
+    .notNull()
+    .references(() => nodes.id),
+}));
