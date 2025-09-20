@@ -24,6 +24,72 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI(title="STEM Connect API", description="A FastAPI backend for STEM Connect application", version="1.0.0", docs_url="/docs", redoc_url="/redoc")
 
+# Initialize postgres database connection
+DATABASE_URL = os.getenv("DATABASE_URL")
+db = psycopg2.connect(DATABASE_URL)
+
+# /**
+#  * APP INFORMATION
+#  */
+
+# // link to user object
+# export const personalInformation = createTable("personal_information", (d) => ({
+#   id: d.varchar({ length: 255 }).notNull().primaryKey(),
+#   age: d.integer(),
+#   gender: d.varchar({ length: 255 }),
+#   location: d.varchar({ length: 255 }),
+#   interests: d.text(),
+#   skills: d.text(),
+#   name: d.varchar({ length: 255 }).notNull(),
+#   title: d.varchar({ length: 255 }),
+#   goal: d.text(),
+#   bio: d.text(),
+#   imageName: d.varchar({ length: 255 }),
+#   userId: d
+#     .varchar({ length: 255 })
+#     .notNull()
+#     .references(() => users.id),
+# }));
+
+# export const nodes = createTable("node", (d) => ({
+#   id: d.varchar({ length: 255 }).notNull().primaryKey(),
+#   name: d.varchar({ length: 255 }).notNull(),
+#   title: d.varchar({ length: 255 }),
+#   type: d.varchar({ length: 255 }).notNull(),
+#   imageName: d.varchar({ length: 255 }),
+#   time: d.text(),
+#   description: d.text(),
+#   createdAt: d
+#     .timestamp({ mode: "date", withTimezone: true })
+#     .notNull()
+#     .default(sql`CURRENT_TIMESTAMP`),
+#   userId: d
+#     .varchar({ length: 255 })
+#     .notNull()
+#     .references(() => users.id),
+# }));
+
+# export const nodesRelations = relations(nodes, ({ many }) => ({
+#   links: many(links),
+# }));
+
+# export const links = createTable("link", (d) => ({
+#   id: d.varchar({ length: 255 }).notNull().primaryKey(),
+#   source: d
+#     .varchar({ length: 255 })
+#     .notNull()
+#     .references(() => nodes.id),
+#   target: d
+#     .varchar({ length: 255 })
+#     .notNull()
+#     .references(() => nodes.id),
+#   userId: d
+#     .varchar({ length: 255 })
+#     .notNull()
+#     .references(() => users.id),
+# }));
+
+
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
