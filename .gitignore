@@ -56,3 +56,6 @@ yarn-error.log*
 
 # Python Caches
 **/__pycache__
+**/__pycache__/
+__pycache__/
+*.pyc
