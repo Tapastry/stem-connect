@@ -102,7 +102,4 @@ export const nodeTypes = [
     label: "Planning & Reflection",
     description: "Future planning, legacy building, or life reflection",
   },
-
-  // OTHER
-  { id: "other", label: "Other", description: "Other significant life change" },
 ];
