@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from models import AddNodeRequest, AddPersonalInformationRequest, Node, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
+from models import AddNodeRequest, AddPersonalInformationRequest, Link, Node, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -35,8 +35,6 @@ app.add_middleware(
 
 # Security
 security = HTTPBearer()
-
-nodes_db: Dict[str, dict] = {}
 
 
 # ADK Agent Endpoints
@@ -95,13 +93,76 @@ async def add_node(request: AddNodeRequest):
         # get prior nodes
         prior_nodes = request.previous_nodes
         return_nodes = []
+        links = []
 
         for i in range(request.num_nodes):
-            # create new name based on first letter of each prior node's id
-            random_letter = random.choice(string.ascii_letters)
-            new_id = f"{random_letter}-{len(prior_nodes) + 1}"
-            new_node = Node(id=new_id)
+            name = f"Node {i + 1}"
+            description = f"This is a description of node {i + 1}"
+            type = "node"
+            image_name = "node.png"
+            time = "1 month"
+            title = "Node Title"
+            created_at = datetime.now()
+            user_id = request.user_id
+            # Create unique ID using timestamp and random string to avoid duplicates
+            unique_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.choice(string.ascii_letters)}{random.choice(string.ascii_letters)}-{i}"
+            new_node = Node(id=unique_id, name=name, description=description, type=type, image_name=image_name, time=time, title=title, created_at=created_at, user_id=user_id)
             return_nodes.append(new_node)
+
+        # create links from the clicked node to all new nodes
+        if request.clicked_node_id:
+            # Find the clicked node in prior_nodes to get its full data
+            clicked_node = next((node for node in prior_nodes if node.id == request.clicked_node_id), None)
+
+            if not clicked_node:
+                # If clicked node not in path, create a minimal node representation
+                clicked_node = Node(id=request.clicked_node_id, name=request.clicked_node_id, description=f"Life event: {request.clicked_node_id}", type="life-event", image_name="", time=datetime.now().isoformat(), title=request.clicked_node_id, created_at=datetime.now(), user_id=request.user_id)
+
+            # First, ensure the clicked node exists in the database
+            with db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (clicked_node.id, clicked_node.name, clicked_node.title, clicked_node.type, clicked_node.image_name, clicked_node.time, clicked_node.description, clicked_node.created_at, clicked_node.user_id),
+                )
+                db.commit()
+
+            # Now create links from clicked node to new nodes
+            for new_node in return_nodes:
+                link_id = f"{clicked_node.id}-{new_node.id}-{request.user_id}"
+                links.append(Link(id=link_id, source=clicked_node.id, target=new_node.id, userId=request.user_id))
+
+        # add the nodes to the database
+        try:
+            with db.cursor() as cursor:
+                for node in return_nodes:
+                    cursor.execute(
+                        """
+                        INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO NOTHING
+                    """,
+                        (node.id, node.name, node.title, node.type, node.image_name, node.time, node.description, node.created_at, node.user_id),
+                    )
+
+                # add the links to the database
+                for link in links:
+                    cursor.execute(
+                        """
+                        INSERT INTO "stem-connect_link" (id, source, target, "userId") 
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (id) DO NOTHING
+                    """,
+                        (link.id, link.source, link.target, link.userId),
+                    )
+
+                db.commit()
+        except Exception as db_error:
+            db.rollback()
+            raise db_error
 
         return return_nodes
 
@@ -109,185 +170,59 @@ async def add_node(request: AddNodeRequest):
         raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")
 
 
-@app.post("/api/nodes", response_model=NodeResponse)
-async def create_node_with_context(request: NodeRequest):
-    """Create a new node with context from all previous nodes in the life path."""
-    node_id = request.id if request.id else str(uuid.uuid4())
-
-    # --- Start of new recursive context gathering ---
-    full_path_outputs = []
-    processed_nodes = set()
-
-    def gather_context_recursively(node_id):
-        if node_id in nodes_db and node_id not in processed_nodes:
-            processed_nodes.add(node_id)
-            node_data = nodes_db[node_id]
-            for parent_id in node_data.get("attached_node_ids", []):
-                gather_context_recursively(parent_id)
-            if node_data.get("output"):
-                full_path_outputs.append(node_data["output"])
-
-    for parent_id in request.attached_nodes_ids:
-        gather_context_recursively(parent_id)
-    # --- End of new recursive context gathering ---
-
-    # --- Start of Summarization Logic ---
-    context_string = ""
-    if not full_path_outputs:
-        context_string = "This is the first event of the story."
-    elif len(full_path_outputs) == 1:
-        # If there's only one parent, just use its full text
-        context_string = f"This story starts with the following event:\\n{full_path_outputs[0]}"
-    else:
-        # For longer histories, use the summarization strategy
-        root_node_text = full_path_outputs[0]
-        immediate_parent_text = full_path_outputs[-1]
-        nodes_to_summarize = full_path_outputs[1:-1]
-
-        summary_of_middle = ""
-        if nodes_to_summarize:
-            summary_of_middle = await adk.summarize_path_history(nodes_to_summarize)
-
-        context_string = f"""
-        Here is the story so far:
-        The story began with this event: "{root_node_text}"
-        Then, a summary of what happened next is: "{summary_of_middle}"
-        The most recent event was: "{immediate_parent_text}"
-        """
-    # --- End of Summarization Logic ---
-
-    # Use custom prompt if provided, otherwise use default
-    prompt = (
-        request.prompt_override
-        if request.prompt_override
-        else f"""
-    Given the life story context below, generate the next realistic life scenario or decision point that could follow.
-    
-    Context:
-    {context_string}
-    
-    Your task is to create the *next* logical event.
-    """
-    )
-
+# Get all nodes and links for a user
+@app.get("/api/get-graph/{user_id}")
+async def get_graph(user_id: str):
+    """Get all nodes and links for a specific user."""
     try:
-        # Generate the response using the specified agent
-        output = await adk.generate_node_response(prompt, request.agent_type)
+        with db.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Get all nodes for the user
+            cursor.execute(
+                """
+                SELECT id, name, title, type, "imageName", time, description, "createdAt", "userId"
+                FROM "stem-connect_node" 
+                WHERE "userId" = %s
+                ORDER BY "createdAt"
+            """,
+                (user_id,),
+            )
+            nodes_data = cursor.fetchall()
 
-        # Store the node in our database
-        nodes_db[node_id] = {"id": node_id, "user_id": request.user_id, "prompt": prompt, "output": output, "attached_node_ids": request.attached_nodes_ids, "agent_type": request.agent_type, "created_at": datetime.now().isoformat()}
+            # Get all links for the user
+            cursor.execute(
+                """
+                SELECT id, source, target, "userId"
+                FROM "stem-connect_link" 
+                WHERE "userId" = %s
+            """,
+                (user_id,),
+            )
+            links_data = cursor.fetchall()
 
-        return NodeResponse(id=node_id, prompt=prompt, output=output, attached_node_ids=request.attached_nodes_ids)
+            return {"user_id": user_id, "nodes": [dict(node) for node in nodes_data], "links": [dict(link) for link in links_data], "total_nodes": len(nodes_data), "total_links": len(links_data)}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create node: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get graph data: {str(e)}")
 
 
-# Add user information gathered on interview screen to database
-@app.post("/api/add-personal-information")
-async def add_personal_information(request: AddPersonalInformationRequest):
-    # add personal information to database
-    return {"message": "Personal information added successfully (placeholder)"}
-
-
-# Update user information gathered on interview screen to database
-@app.put("/api/update-personal-information")
-async def update_personal_information(request: UpdatePersonalInformationRequest):
-    # update personal information in database
-    return {"message": "Personal information updated successfully (placeholder)"}
-
-
-# Get user information gathered on interview screen from database
-@app.get("/api/personal-information/{user_id}")
-async def get_personal_information(user_id: str):
-    # get personal information for user
-    return {"message": f"Personal information for user {user_id} (placeholder)"}
-
-
-# Get all nodes for user from database
-@app.get("/api/nodes/{user_id}")
-async def get_nodes(user_id: str):
-    """Get all nodes for a specific user."""
-    user_nodes = {node_id: node_data for node_id, node_data in nodes_db.items() if node_data.get("user_id") == user_id}
-    return {"user_id": user_id, "nodes": user_nodes, "total": len(user_nodes)}
-
-
-# Get all links for user from database
-@app.get("/api/links/{user_id}")
-async def get_links(user_id: str):
-    # get all links for user
-    return {"message": f"Links for user {user_id} (placeholder)"}
-
-
-# Get a specific node by ID
-@app.get("/api/node/{node_id}")
-async def get_node(node_id: str):
-    """Get a specific node by its ID."""
-    if node_id not in nodes_db:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-
-    return nodes_db[node_id]
-
-
-# Get the full path history for a node
-@app.get("/api/node/{node_id}/path")
-async def get_node_path(node_id: str):
-    """Get the complete path history leading to this node."""
-    if node_id not in nodes_db:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-
-    path = []
-    current_node = nodes_db[node_id]
-
-    # Build the path by traversing backwards through attached nodes
-    def build_path(node_data):
-        path.append({"id": node_data["id"], "output": node_data["output"], "created_at": node_data.get("created_at")})
-
-        # Recursively add parent nodes
-        for parent_id in node_data.get("attached_node_ids", []):
-            if parent_id in nodes_db:
-                build_path(nodes_db[parent_id])
-
-    build_path(current_node)
-
-    # Reverse to get chronological order
-    path.reverse()
-
-    return {"node_id": node_id, "path": path, "depth": len(path)}
-
-
-# Delete a node and optionally its descendants
-@app.delete("/api/node/{node_id}")
-async def delete_node(node_id: str, delete_descendants: bool = False):
-    """Delete a node and optionally all nodes that branch from it."""
-    if node_id not in nodes_db:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-
-    deleted_nodes = [node_id]
-
-    if delete_descendants:
-        # Find all descendant nodes
-        def find_descendants(parent_id):
-            for nid, node_data in nodes_db.items():
-                if parent_id in node_data.get("attached_node_ids", []):
-                    deleted_nodes.append(nid)
-                    find_descendants(nid)  # Recursively find children
-
-        find_descendants(node_id)
-
-    # Delete all identified nodes
-    for nid in deleted_nodes:
-        del nodes_db[nid]
-
-    return {"deleted": deleted_nodes, "count": len(deleted_nodes)}
-
-
-# Get available AI agents
-@app.get("/api/agents")
-async def get_available_agents():
-    """Get a list of all available AI agents."""
+# Instantiate a "You" node for a user if it doesn't exist
+@app.post("/api/instantiate/{user_id}")
+async def instantiate_user_node(user_id: str):
+    """Create a 'You' node at origin (0,0,0) if it doesn't already exist."""
     try:
-        agents = adk.get_available_agents()
-        return {"agents": agents, "default": "interviewer_agent", "total": len(agents)}
+        with db.cursor() as cursor:
+            # Try to insert the "You" node, ignore if it already exists
+            cursor.execute(
+                """
+                INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                ("Now", "Now", "Your Current Position in Life", "self", "", "Present", "This represents your current position in life", datetime.now(), user_id),
+            )
+            db.commit()
+
+            return {"message": "You node instantiated", "node_id": "You", "user_id": user_id}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get agents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to instantiate user node: {str(e)}")

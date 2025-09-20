@@ -30,10 +30,6 @@ export const users = createTable("user", (d) => ({
   image: d.varchar({ length: 255 }),
 }));
 
-export const usersRelations = relations(users, ({ many }) => ({
-  accounts: many(accounts),
-}));
-
 export const accounts = createTable(
   "account",
   (d) => ({
@@ -70,10 +66,6 @@ export const sessions = createTable(
   }),
   (t) => [index("t_user_id_idx").on(t.userId)],
 );
-
-export const sessionsRelations = relations(sessions, ({ one }) => ({
-  user: one(users, { fields: [sessions.userId], references: [users.id] }),
-}));
 
 export const verificationTokens = createTable(
   "verification_token",
@@ -126,10 +118,6 @@ export const nodes = createTable("node", (d) => ({
     .references(() => users.id),
 }));
 
-export const nodesRelations = relations(nodes, ({ many }) => ({
-  links: many(links),
-}));
-
 export const links = createTable("link", (d) => ({
   id: d.varchar({ length: 255 }).notNull().primaryKey(),
   source: d
@@ -144,4 +132,51 @@ export const links = createTable("link", (d) => ({
     .varchar({ length: 255 })
     .notNull()
     .references(() => users.id),
+}));
+
+// All relations defined at the end to avoid forward reference issues
+export const usersRelations = relations(users, ({ many }) => ({
+  accounts: many(accounts),
+  sessions: many(sessions),
+  personalInformation: many(personalInformation),
+  nodes: many(nodes),
+  links: many(links),
+}));
+
+export const accountsRelations = relations(accounts, ({ one }) => ({
+  user: one(users, { fields: [accounts.userId], references: [users.id] }),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, { fields: [sessions.userId], references: [users.id] }),
+}));
+
+export const personalInformationRelations = relations(
+  personalInformation,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [personalInformation.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const nodesRelations = relations(nodes, ({ many, one }) => ({
+  outgoingLinks: many(links, { relationName: "sourceNode" }),
+  incomingLinks: many(links, { relationName: "targetNode" }),
+  user: one(users, { fields: [nodes.userId], references: [users.id] }),
+}));
+
+export const linksRelations = relations(links, ({ one }) => ({
+  sourceNode: one(nodes, {
+    fields: [links.source],
+    references: [nodes.id],
+    relationName: "sourceNode",
+  }),
+  targetNode: one(nodes, {
+    fields: [links.target],
+    references: [nodes.id],
+    relationName: "targetNode",
+  }),
+  user: one(users, { fields: [links.userId], references: [users.id] }),
 }));

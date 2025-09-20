@@ -12,6 +12,14 @@ class Node(BaseModel):
     """Represents a life path node/decision point."""
 
     id: str
+    name: str
+    description: str
+    type: str
+    image_name: str
+    time: str
+    title: str
+    created_at: datetime
+    user_id: str
 
 
 class Link(BaseModel):
