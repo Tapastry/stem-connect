@@ -2,6 +2,7 @@ import os
 import uuid
 from dataclasses import Field
 from datetime import datetime
+from tkinter import N
 from typing import Dict, List, Optional
 
 import adk
@@ -93,6 +94,7 @@ class NodeRequest(BaseModel):
     agent_type: str = "interviewer_agent"
     attached_nodes_ids: Optional[List[str]] = []
 
+
 class NodeResponse(BaseModel):
     id: str
     prompt: str
@@ -178,7 +180,16 @@ async def add_node(request: AddNodeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Node generation failed: {str(e)}")
 
+
 @app.post("/api/nodes", response_model=NodeResponse)
+async def create_node_with_context(request: NodeRequest):
+    node_id = str(uuid.uuid4())
+
+    context_outputs = []
+    for attached_id in request.attached_nodes_ids:
+        if attached_id in nodes_db and nodes_db[attached_id].get("output"):
+            context_outputs.append(f"Previous node output: {nodes_db[attached_id]['output']}")
+
 
 # Add user information gathered on interview screen to database
 @app.post("/api/add-personal-information")
