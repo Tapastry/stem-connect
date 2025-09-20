@@ -111,12 +111,23 @@ export default function Life({
           height={size.height}
           graphData={graphData}
           key={`graph-${nodes.length}-${links.length}`}
-          onNodeClick={(node: any) => {
+          onNodeClick={(node: any, event: any) => {
             console.log("Node clicked in ForceGraph:", node.id, node);
+            console.log("Shift key held:", event?.shiftKey);
 
-            // Just generate new nodes - no expansion logic needed
-            console.log("Calling handleNodeClick with:", node.id);
-            handleNodeClick(node.id);
+            // Only generate new nodes if shift key is held
+            if (event?.shiftKey) {
+              console.log(
+                "Shift+Click: Calling handleNodeClick with:",
+                node.id,
+              );
+              handleNodeClick(node.id);
+            } else {
+              console.log(
+                "Normal click: Will open info pane (not implemented yet)",
+              );
+              // TODO: Open info pane for this node
+            }
           }}
           nodeThreeObjectExtend={false}
           nodeThreeObject={(node: any) => {
