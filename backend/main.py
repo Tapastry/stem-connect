@@ -2,7 +2,7 @@ import os
 import uuid
 from dataclasses import Field
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import adk
 import psycopg2
@@ -32,6 +32,8 @@ app.add_middleware(
 
 # Security
 security = HTTPBearer()
+
+nodes_db: Dict[str, dict] = {}
 
 
 # Pydantic models
@@ -84,6 +86,18 @@ class AddPersonalInformationRequest(BaseModel):
 class UpdatePersonalInformationRequest(BaseModel):
     id: str
     personalInformation: PersonalInformation
+
+
+class NodeRequest(BaseModel):
+    id: str
+    agent_type: str = "interviewer_agent"
+    attached_nodes_ids: Optional[List[str]] = []
+
+class NodeResponse(BaseModel):
+    id: str
+    prompt: str
+    output: str
+    attached_node_ids: List[str]
 
 
 # ADK Agent Endpoints
