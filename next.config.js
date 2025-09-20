@@ -5,6 +5,9 @@
 import "./src/env.js";
 
 /** @type {import("next").NextConfig} */
-const config = {};
+const config = {
+  // Fix the lockfile warning by setting the correct root
+  outputFileTracingRoot: "/home/carlos/Development/stem-connect",
+};
 
 export default config;

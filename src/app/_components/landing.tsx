@@ -7,6 +7,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 // Dynamically import the 3D components to avoid SSR issues
 const ForceGraph3D = dynamic(() => import("react-force-graph-3d"), {
@@ -33,85 +35,46 @@ export default function Landing() {
   const [SpriteText, setSpriteText] = useState<any>(null);
   const [isAddingNode, setIsAddingNode] = useState(false);
   const graphRef = useRef<any>(null);
+  const { data: session, status } = useSession();
+  const router = useRouter();
 
   // Generate procedural nodes and links
-  const generateGraphData = (count: number) => {
+  const generateGraphData = (count: number): { nodes: any[]; links: any[] } => {
     const nodes: any[] = [];
     const links: any[] = [];
     
-    // Generate fixed nodes with colors and positions
+    // Generate fixed nodes with colors and positions scattered across visible screen
     for (let i = 0; i < count; i++) {
-      const angle = (i / count) * 2 * Math.PI;
-      const radius = 200;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      const z = (Math.random() - 0.5) * 100; // Random z position
+      // Tight distribution within visible screen boundaries
+      const x = (Math.random() - 0.5) * 400; // Spread across 400 units horizontally (visible area)
+      const y = (Math.random() - 0.5) * 300; // Spread across 300 units vertically (visible area)
+      const z = (Math.random() - 0.5) * 200; // Spread across 200 units in depth (visible area)
       
       nodes.push({
         id: `node-${i}`,
         group: Math.floor(Math.random() * 10),
         color: nodeColors[Math.floor(Math.random() * nodeColors.length)],
         val: Math.random() * 10 + 1, // Random size between 1-11
-        // Fix nodes in place
-        fx: x,
-        fy: y,
-        fz: z,
+        // Allow subtle movement by not fixing positions
+        x: x,
+        y: y,
+        z: z,
       });
     }
 
-    // Ensure each node connects to 1-3 other nodes
+    // Minimal connections to prevent clustering - only connect a few nodes
     if (nodes.length >= 2) {
-      // Connect the first two nodes to establish the initial connection
-      if (nodes.length === 2) {
-        links.push({
-          source: nodes[0]?.id ?? "",
-          target: nodes[1]?.id ?? "",
-          value: 1,
-        });
-      } else {
-        // For each node, ensure it has 1-3 connections
-        for (let i = 0; i < nodes.length; i++) {
-          const currentConnections = links.filter(link => 
-            link.source === nodes[i]?.id || link.target === nodes[i]?.id
-          ).length;
-          
-          // If this node has less than 1 connection, add one
-          if (currentConnections < 1) {
-            const availableNodes = nodes.filter((_, j) => j !== i);
-            const targetNode = availableNodes[Math.floor(Math.random() * availableNodes.length)];
-            links.push({
-              source: nodes[i]?.id ?? "",
-              target: targetNode?.id ?? "",
-              value: 1,
-            });
-          }
-          
-          // Add 0-2 additional random connections (max 3 total)
-          const additionalConnections = Math.floor(Math.random() * 3); // 0, 1, or 2
-          for (let j = 0; j < additionalConnections; j++) {
-            const currentConnections = links.filter(link => 
-              link.source === nodes[i]?.id || link.target === nodes[i]?.id
-            ).length;
-            
-            if (currentConnections < 3) {
-              const availableNodes = nodes.filter((_, k) => 
-                k !== i && 
-                !links.some(link => 
-                  (link.source === nodes[i]?.id && link.target === nodes[k]?.id) ||
-                  (link.target === nodes[i]?.id && link.source === nodes[k]?.id)
-                )
-              );
-              
-              if (availableNodes.length > 0) {
-                const targetNode = availableNodes[Math.floor(Math.random() * availableNodes.length)];
-                links.push({
-                  source: nodes[i]?.id ?? "",
-                  target: targetNode?.id ?? "",
-                  value: 1,
-                });
-              }
-            }
-          }
+      // Only connect 2-3 random pairs to create a loose network
+      const numConnections = Math.min(3, Math.floor(nodes.length / 3));
+      for (let i = 0; i < numConnections; i++) {
+        const sourceIndex = Math.floor(Math.random() * nodes.length);
+        const targetIndex = Math.floor(Math.random() * nodes.length);
+        if (sourceIndex !== targetIndex) {
+          links.push({
+            source: nodes[sourceIndex]?.id ?? "",
+            target: nodes[targetIndex]?.id ?? "",
+            value: 1,
+          });
         }
       }
     }
@@ -120,9 +83,55 @@ export default function Landing() {
   };
 
   const [graphData, setGraphData] = useState(generateGraphData(8)); // Start with 8 fixed nodes
+  const MAX_NODES = 40; // Cap at 40 nodes
 
-  // Function to add a new connecting node (no cleanup, no limits)
-  const addConnectingNode = (currentData: any) => {
+  // Handle Google sign-in or redirect to life page
+  const handleSignIn = () => {
+    console.log("Sign in button clicked");
+    console.log("Session status:", status);
+    console.log("Session data:", session);
+    
+    // If user is already signed in, redirect to /life
+    if (session) {
+      console.log("User already signed in, redirecting to /life");
+      router.push("/life");
+      return;
+    }
+    
+    // If user is not signed in, start Google OAuth flow
+    console.log("Starting Google OAuth flow");
+    try {
+      void signIn("google", { callbackUrl: "/life" });
+    } catch (error) {
+      console.error("Sign in error:", error);
+    }
+  };
+
+  // Function to add a new connecting node (with 40 node limit)
+  const addConnectingNode = (currentData: { nodes: any[]; links: any[] }): { nodes: any[]; links: any[] } => {
+    // If we're at the limit, remove the oldest connecting node before adding a new one
+    if (currentData.nodes.length >= MAX_NODES) {
+      const connectingNodes = currentData.nodes.filter((node: any) => node.id.startsWith('connecting-node'));
+      if (connectingNodes.length > 0) {
+        // Remove the oldest connecting node
+        const oldestNode = connectingNodes.sort((a: any, b: any) => {
+          const aId = typeof a.id === 'string' ? a.id : '';
+          const bId = typeof b.id === 'string' ? b.id : '';
+          const aTime = parseInt((aId.split('-')[2] ?? '0') as string, 10);
+          const bTime = parseInt((bId.split('-')[2] ?? '0') as string, 10);
+          return aTime - bTime;
+        })[0];
+        
+        const newNodes = currentData.nodes.filter((node: any) => node.id !== oldestNode.id);
+        const newLinks = currentData.links.filter((link: any) => 
+          link.source !== oldestNode.id && link.target !== oldestNode.id
+        );
+        
+        return { nodes: newNodes, links: newLinks };
+      }
+      return currentData;
+    }
+    
     const timestamp = Date.now();
     const connectingNodeId = `connecting-node-${timestamp}`;
     
@@ -130,27 +139,25 @@ export default function Landing() {
     const newNodes = [...currentData.nodes];
     const newLinks = [...currentData.links];
     
-    // Add new connecting node
-    const angle = Math.random() * 2 * Math.PI;
-    const radius = 150 + Math.random() * 100;
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    const z = (Math.random() - 0.5) * 200;
+    // Add new connecting node within visible screen boundaries
+    const x = (Math.random() - 0.5) * 400; // Spread across 400 units horizontally (visible area)
+    const y = (Math.random() - 0.5) * 300; // Spread across 300 units vertically (visible area)
+    const z = (Math.random() - 0.5) * 200; // Spread across 200 units in depth (visible area)
     
     const connectingNode = {
       id: connectingNodeId,
-      group: 0,
-      color: '#ffffff', // White connecting node
-      val: 3, // Smaller size
+      group: Math.floor(Math.random() * 10),
+      color: nodeColors[Math.floor(Math.random() * nodeColors.length)], // Random color from palette
+      val: Math.random() * 8 + 2, // Random size between 2-10
       x, y, z,
-      fx: x, fy: y, fz: z, // Fixed position
+      // Allow subtle movement by not fixing position
     };
 
     newNodes.push(connectingNode);
 
-    // Connect to 1-2 random fixed nodes (the original 8)
+    // Connect to 0-1 random fixed nodes (the original 8) - fewer connections to prevent clustering
     const fixedNodes = currentData.nodes.filter((node: any) => !node.id.startsWith('connecting-node'));
-    const numConnections = Math.floor(Math.random() * 2) + 1; // 1 or 2 connections
+    const numConnections = Math.random() < 0.3 ? 1 : 0; // Only 30% chance of connection
     
     for (let i = 0; i < numConnections && fixedNodes.length > 0; i++) {
       const targetNode = fixedNodes[Math.floor(Math.random() * fixedNodes.length)];
@@ -169,9 +176,12 @@ export default function Landing() {
     
     // Dynamically import SpriteText
     import("three-spritetext").then((module: { default: any }) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       setSpriteText(() => module.default);
-    }).catch(() => {
+    }).catch((error: unknown) => {
       // Handle import error silently
+      console.warn('Failed to load three-spritetext:', error);
+      setSpriteText(null);
     });
     
     // Add new connecting nodes that appear and disappear
@@ -188,13 +198,15 @@ export default function Landing() {
     return () => clearInterval(nodeInterval);
   }, []);
 
-  // Configure forces for better node spacing
+  // Configure forces for visible screen distribution
   useEffect(() => {
     if (graphRef.current) {
-      // Adjust link force for fixed nodes
-      graphRef.current.d3Force('link').distance(100);
-      // Reduce charge force since most nodes are fixed
-      graphRef.current.d3Force('charge').strength(-50);
+      // Shorter link distance to prevent clustering
+      graphRef.current.d3Force('link').distance(40);
+      // Gentle charge force for subtle movement without off-screen drift
+      graphRef.current.d3Force('charge').strength(-15);
+      // Very weak center force to keep nodes roughly centered
+      graphRef.current.d3Force('center').strength(0.05);
     }
   }, [graphData]);
 
@@ -211,11 +223,11 @@ export default function Landing() {
     }
   }, [isAddingNode]);
 
-  // Set initial camera position and keep it zoomed out
+  // Set initial camera position to show visible screen area
   useEffect(() => {
     if (graphRef.current) {
-      // Set camera to stay zoomed out
-      graphRef.current.cameraPosition({ x: 0, y: 0, z: 800 });
+      // Set camera to show the tight visible screen boundaries
+      graphRef.current.cameraPosition({ x: 0, y: 0, z: 600 });
     }
   }, [graphData]);
 
@@ -234,8 +246,13 @@ export default function Landing() {
             </h2>
           </div>
           
-          <button className="group relative mt-12 px-16 py-5 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-sm border border-white/20 rounded-full font-light text-xl transition-all duration-300 hover:from-white/20 hover:to-white/10 hover:scale-105 hover:shadow-2xl hover:shadow-white/10 font-inter">
-            <span className="relative z-10">start simulating</span>
+          <button 
+           onClick={handleSignIn}
+           className="group relative mt-12 px-16 py-5 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-sm border border-white/20 rounded-full font-light text-xl transition-all duration-300 hover:from-white/20 hover:to-white/10 hover:scale-105 hover:shadow-2xl hover:shadow-white/10 font-inter"
+         >
+            <span className="relative z-10">
+              {status === "loading" ? "loading..." : session ? "continue simulating" : "start simulating"}
+            </span>
             <div className="absolute inset-0 rounded-full bg-gradient-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           </button>
         </div>
@@ -252,7 +269,7 @@ export default function Landing() {
           graphData={graphData}
           nodeColor="color"
           nodeVal="val"
-          nodeRelSize={6}
+          nodeRelSize={8}
           linkColor={(link: any) => {
             // Find the source node to get its color
             const sourceNode = graphData.nodes.find((node: any) => node.id === link.source);
@@ -268,8 +285,8 @@ export default function Landing() {
           enableNodeDrag={false}
           enableNavigationControls={false}
           enablePointerInteraction={false}
-          d3AlphaDecay={0.005}
-          d3VelocityDecay={0.5}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.6}
         />
       </div>
       
@@ -285,8 +302,13 @@ export default function Landing() {
           </h2>
         </div>
         
-        <button className="group relative mt-12 px-16 py-5 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-sm border border-white/20 rounded-full font-light text-xl transition-all duration-300 hover:from-white/20 hover:to-white/10 hover:scale-105 hover:shadow-2xl hover:shadow-white/10 font-inter">
-          <span className="relative z-10">start simulating</span>
+        <button 
+          onClick={handleSignIn}
+          className="group relative mt-12 px-16 py-5 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-sm border border-white/20 rounded-full font-light text-xl transition-all duration-300 hover:from-white/20 hover:to-white/10 hover:scale-105 hover:shadow-2xl hover:shadow-white/10 font-inter"
+        >
+          <span className="relative z-10">
+            {status === "loading" ? "loading..." : session ? "continue simulating" : "start simulating"}
+          </span>
           <div className="absolute inset-0 rounded-full bg-gradient-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
         </button>
       </div>

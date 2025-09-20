@@ -58,4 +58,8 @@ export const authConfig = {
       },
     }),
   },
+  pages: {
+    signIn: "/",
+  },
+  secret: process.env.AUTH_SECRET,
 } satisfies NextAuthConfig;
