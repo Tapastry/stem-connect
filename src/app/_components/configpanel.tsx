@@ -17,7 +17,7 @@ const SearchIcon = () => (
 );
 
 // The main control panel component.
-const KnowledgeGraphControls = ({ onGenerate, onReset }) => {
+const ConfigPanel = ({ onGenerate, onReset }) => {
   // State for all the interactive elements
   const [query, setQuery] = useState("");
   const [depth, setDepth] = useState(3);
@@ -62,29 +62,26 @@ const KnowledgeGraphControls = ({ onGenerate, onReset }) => {
 
   return (
     <>
-      {/* Styling pseudo-elements like ::-webkit-slider-thumb isn't possible with inline styles or Tailwind directly.
-              This style block is a common way to apply them within a component file.
-            */}
       <style>
         {`
-                    .custom-range::-webkit-slider-thumb {
-                        -webkit-appearance: none;
-                        appearance: none;
-                        width: 18px;
-                        height: 18px;
-                        background: #6366f1; /* bg-indigo-500 */
-                        cursor: pointer;
-                        border-radius: 50%;
-                        border: 2px solid #e5e7eb; /* bg-gray-200 */
-                    }
-                    .custom-range::-moz-range-thumb {
-                        width: 18px;
-                        height: 18px;
-                        background: #6366f1;
-                        cursor: pointer;
-                        border-radius: 50%;
-                        border: 2px solid #e5e7eb;
-                    }
+          .custom-range::-webkit-slider-thumb {
+              -webkit-appearance: none;
+              appearance: none;
+              width: 18px;
+              height: 18px;
+              background: #6366f1; /* bg-indigo-500 */
+              cursor: pointer;
+              border-radius: 50%;
+              border: 2px solid #e5e7eb; /* bg-gray-200 */
+          }
+          .custom-range::-moz-range-thumb {
+              width: 18px;
+              height: 18px;
+              background: #6366f1;
+              cursor: pointer;
+              border-radius: 50%;
+              border: 2px solid #e5e7eb;
+          }
                 `}
       </style>
 
@@ -207,4 +204,4 @@ const KnowledgeGraphControls = ({ onGenerate, onReset }) => {
   );
 };
 
-export default KnowledgeGraphControls;
+export default ConfigPanel;
