@@ -7,7 +7,7 @@ import SpriteText from "three-spritetext";
 import { getHighlightPath } from "./highlight";
 import * as THREE from "three";
 import { createCollapsibleGraph } from "./pruned";
-import LifeWrap from "./LifeWrap";
+import LifeWrap from "./lifewrap";
 
 export default function Life({ user: _user }: { user: User }) {
   const [isMounted, setIsMounted] = useState(false);
