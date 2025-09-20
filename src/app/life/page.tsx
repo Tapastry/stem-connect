@@ -1,5 +1,5 @@
 import { auth } from "~/server/auth";
-import Life from "../_components/life";
+import LifeWrap from "../_components/lifewrap";
 
 export default async function LifePage() {
   const session = await auth();
@@ -18,8 +18,8 @@ export default async function LifePage() {
   }
 
   return (
-    <div>
-      <Life user={session.user} />
+    <div className="h-screen w-screen">
+      <LifeWrap user={session.user} />
     </div>
   );
 }

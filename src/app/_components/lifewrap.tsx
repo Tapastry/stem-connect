@@ -1,11 +1,10 @@
-import { useState } from "react";
+"use client";
+import type { User } from "next-auth";
+import { useEffect, useState } from "react";
 import ConfigPanel from "./configpanel";
+import Life from "./life";
 
-interface LifeWrapProps {
-  children: React.ReactNode;
-}
-
-export default function LifeWrap({ children }: LifeWrapProps) {
+export default function LifeWrap({ user }: { user: User }) {
   const [config, setConfig] = useState({
     prompt: "",
     positivity: -1,
@@ -13,6 +12,12 @@ export default function LifeWrap({ children }: LifeWrapProps) {
     type: "",
     num_nodes: 1,
   });
+
+  const [highlightedPath, setHighlightedPathState] = useState<string[]>([]);
+
+  useEffect(() => {
+    console.log("IN LIFEWRAP", highlightedPath);
+  }, [highlightedPath]);
 
   return (
     <div className="flex h-screen w-screen">
@@ -24,7 +29,9 @@ export default function LifeWrap({ children }: LifeWrapProps) {
           onReset={() => 1}
         />
       </div>
-      <div className="h-full w-2/3">{children}</div>
+      <div className="h-full w-2/3">
+        <Life user={user} setHighlightedPath={setHighlightedPathState} />
+      </div>
     </div>
   );
 }
