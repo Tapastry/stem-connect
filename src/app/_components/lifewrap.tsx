@@ -1,6 +1,6 @@
 "use client";
 import type { User } from "next-auth";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ConfigPanel from "./configpanel";
 import Life from "./life";
 
@@ -348,7 +348,20 @@ export default function LifeWrap({ user }: { user: User }) {
   const [links, setLinks] = useState<Link[]>([]);
   const [highlightedPath, setHighlightedPathState] = useState<string[]>([]);
   const [nodesToView, setNodesToView] = useState<Node[]>([]);
-  const fgRef = useRef<any>(null);
+  const fgRef = useCallback((node: any) => {
+    // Check if the node is being mounted
+    if (node !== null) {
+      node.d3Force("charge").strength(-300);
+      const linkForce = node.d3Force("link") as any;
+
+      console.log("LINK FORCE: ", linkForce);
+      if (!linkForce) return;
+
+      linkForce.distance((link: Link) => {
+        return link.timeInMonths ?? 10;
+      });
+    }
+  }, []);
 
   // Load graph data from database on mount
   useEffect(() => {
@@ -614,8 +627,6 @@ export default function LifeWrap({ user }: { user: User }) {
               setNodes,
               setLinks,
             );
-            fgRef.current.d3Force("charge").strength(-300);
-            fgRef.current.d3Force("link").distance(200);
           }}
           handleNodeDelete={(nodeId: string) => {
             onNodeDelete(nodeId, user, setNodes, setLinks);
