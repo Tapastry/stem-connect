@@ -120,7 +120,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       </style>
 
       {/* Control Panel Component */}
-      <div className="flex h-full w-full flex-col gap-4 border border-gray-700 bg-gray-900 p-4 font-sans shadow-lg shadow-indigo-500/10">
+      <div className="flex min-h-full w-full flex-col gap-4 border border-gray-700 bg-gray-900 p-4 font-sans shadow-lg shadow-indigo-500/10">
         {/* Header */}
         <div className="text-center">
           <h1 className="text-xl font-bold text-white">Life Graph Console</h1>
