@@ -359,7 +359,7 @@ async def add_node(request: AddNodeRequest):
             event_time_months = ai_content.get("time_months", request.time_in_months if request.time_in_months > 0 else random.randint(1, 24))
             event_positivity = ai_content.get("positivity_score", request.positivity if request.positivity >= 0 else random.randint(0, 100))
 
-            new_node = Node(id=readable_id, name=ai_content["name"], description=ai_content["description"], type=ai_content["type"], image_name="", time=f"{event_time_months} months (positivity: {event_positivity}%)", title=ai_content["title"], created_at=created_at, user_id=user_id)
+            new_node = Node(id=readable_id, name=ai_content["name"], description=ai_content["description"], type=ai_content["type"], image_name="", timeInMonths=event_time_months, title=ai_content["title"], created_at=created_at, user_id=user_id)
             return_nodes.append(new_node)
 
         # create links from the clicked node to all new nodes
@@ -369,17 +369,17 @@ async def add_node(request: AddNodeRequest):
 
             if not clicked_node:
                 # If clicked node not in path, create a minimal node representation
-                clicked_node = Node(id=request.clicked_node_id, name=request.clicked_node_id, description=f"Life event: {request.clicked_node_id}", type="life-event", image_name="", time=datetime.now().isoformat(), title=request.clicked_node_id, created_at=datetime.now(), user_id=request.user_id)
+                clicked_node = Node(id=request.clicked_node_id, name=request.clicked_node_id, description=f"Life event: {request.clicked_node_id}", type="life-event", image_name="", timeInMonths=1, title=request.clicked_node_id, created_at=datetime.now(), user_id=request.user_id)
 
             # First, ensure the clicked node exists in the database
             with db.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                    INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", "timeInMonths", description, "createdAt", "userId") 
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO NOTHING
-                    """,
-                    (clicked_node.id, clicked_node.name, clicked_node.title, clicked_node.type, clicked_node.image_name, clicked_node.time, clicked_node.description, clicked_node.created_at, clicked_node.user_id),
+                """,
+                    (clicked_node.id, clicked_node.name, clicked_node.title, clicked_node.type, clicked_node.image_name, clicked_node.timeInMonths, clicked_node.description, clicked_node.created_at, clicked_node.user_id),
                 )
                 db.commit()
 
@@ -394,11 +394,11 @@ async def add_node(request: AddNodeRequest):
                 for node in return_nodes:
                     cursor.execute(
                         """
-                        INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                        INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", "timeInMonths", description, "createdAt", "userId") 
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO NOTHING
                     """,
-                        (node.id, node.name, node.title, node.type, node.image_name, node.time, node.description, node.created_at, node.user_id),
+                        (node.id, node.name, node.title, node.type, node.image_name, node.timeInMonths, node.description, node.created_at, node.user_id),
                     )
 
                 # add the links to the database
@@ -432,7 +432,7 @@ async def get_graph(user_id: str):
             # Get all nodes for the user
             cursor.execute(
                 """
-                SELECT id, name, title, type, "imageName", time, description, "createdAt", "userId"
+                SELECT id, name, title, type, "imageName", "timeInMonths", description, "createdAt", "userId"
                 FROM "stem-connect_node" 
                 WHERE "userId" = %s
                 ORDER BY "createdAt"
@@ -467,11 +467,11 @@ async def instantiate_user_node(user_id: str):
             # Try to insert the "You" node, ignore if it already exists
             cursor.execute(
                 """
-                INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", time, description, "createdAt", "userId") 
+                INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", "timeInMonths", description, "createdAt", "userId") 
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO NOTHING
                 """,
-                ("Now", "Now", "Your Current Position in Life", "self", "", "Present", "This represents your current position in life", datetime.now(), user_id),
+                ("Now", "Now", "Your Current Position in Life", "self", "", 0, "This represents your current position in life", datetime.now(), user_id),
             )
             db.commit()
 

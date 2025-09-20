@@ -19,7 +19,7 @@ interface Node {
   title?: string;
   type?: string;
   imageName?: string;
-  time?: string;
+  timeInMonths?: number;
   description?: string;
   createdAt?: string;
   userId?: string;
@@ -74,7 +74,7 @@ const onNodeClick = async (
       description: frontendNode?.description || `Life event: ${nodeId}`,
       type: frontendNode?.type || "life-event",
       image_name: frontendNode?.imageName || "",
-      time: frontendNode?.time || new Date().toISOString(),
+      timeInMonths: frontendNode?.timeInMonths || 1,
       title: frontendNode?.title || nodeId,
       created_at: frontendNode?.createdAt || new Date().toISOString(),
       user_id: frontendNode?.userId || user.id || "anonymous",
@@ -132,7 +132,7 @@ const onNodeClick = async (
           description: backendNode.description,
           type: backendNode.type,
           imageName: backendNode.image_name,
-          time: backendNode.time,
+          timeInMonths: backendNode.timeInMonths,
           createdAt: backendNode.created_at,
           userId: backendNode.user_id,
         };
@@ -408,7 +408,7 @@ export default function LifeWrap({ user }: { user: User }) {
           title: dbNode.title,
           type: dbNode.type,
           imageName: dbNode.imageName,
-          time: dbNode.time,
+          timeInMonths: dbNode.timeInMonths,
           description: dbNode.description,
           createdAt: dbNode.createdAt,
           userId: dbNode.userId,
@@ -510,29 +510,6 @@ export default function LifeWrap({ user }: { user: User }) {
                 </p>
               </div>
 
-              {/* Prompt Input for Node View */}
-              <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
-                <label
-                  htmlFor="node-prompt"
-                  className="text-sm font-medium text-gray-300"
-                >
-                  Additional Context
-                </label>
-                <input
-                  id="node-prompt"
-                  type="text"
-                  placeholder="e.g., 'Focus on remote work opportunities'"
-                  value={config.prompt}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      prompt: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
               {nodesToView.length > 0 ? (
                 <div className="flex-1 space-y-3 overflow-y-auto">
                   {nodesToView.map((node, index) => (
@@ -564,7 +541,9 @@ export default function LifeWrap({ user }: { user: User }) {
                               {node.type || "Unknown type"}
                             </span>
                             <span className="rounded bg-gray-700 px-2 py-1 text-gray-300">
-                              {node.time || "No time"}
+                              {node.timeInMonths
+                                ? `${node.timeInMonths} months`
+                                : "No time"}
                             </span>
                           </div>
                         </div>
@@ -591,6 +570,29 @@ export default function LifeWrap({ user }: { user: User }) {
                   </div>
                 </div>
               )}
+
+              {/* Prompt Input at Bottom */}
+              <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+                <label
+                  htmlFor="node-prompt"
+                  className="text-sm font-medium text-gray-300"
+                >
+                  Additional Context
+                </label>
+                <input
+                  id="node-prompt"
+                  type="text"
+                  placeholder="e.g., 'Focus on remote work opportunities'"
+                  value={config.prompt}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      prompt: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
             </div>
           )}
         </div>

@@ -30,7 +30,7 @@ interface Node {
   title?: string;
   type?: string;
   imageName?: string;
-  time?: string;
+  timeInMonths?: number;
   description?: string;
   createdAt?: string;
   userId?: string;

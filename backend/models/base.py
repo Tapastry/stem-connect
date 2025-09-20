@@ -16,7 +16,7 @@ class Node(BaseModel):
     description: str
     type: str
     image_name: str
-    time: str
+    timeInMonths: int
     title: str
     created_at: datetime
     user_id: str
