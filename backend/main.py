@@ -1,4 +1,6 @@
 import os
+import random
+import string
 import uuid
 from dataclasses import Field
 from datetime import datetime
@@ -96,8 +98,8 @@ async def add_node(request: AddNodeRequest):
 
         for i in range(request.num_nodes):
             # create new name based on first letter of each prior node's id
-            prefix = "".join([node.id[0] for node in prior_nodes if node.id])
-            new_id = f"{prefix}-{i + 1}" if prefix else f"Node-{i + 1}"
+            random_letter = random.choice(string.ascii_letters)
+            new_id = f"{random_letter}-{len(prior_nodes) + 1}"
             new_node = Node(id=new_id)
             return_nodes.append(new_node)
 

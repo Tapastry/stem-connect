@@ -38,6 +38,7 @@ const initialLinks: Link[] = [];
 
 const onNodeClick = async (
   clickedNodeId: string,
+  currentPath: string[],
   config: Config,
   currentNodes: Node[],
   currentLinks: Link[],
@@ -54,7 +55,7 @@ const onNodeClick = async (
   }
 
   // Convert frontend nodes to backend format (only id field)
-  const backendNodes = currentNodes.map((node) => ({ id: node.id }));
+  const backendNodes = currentPath.map((node) => ({ id: node }));
 
   const request = {
     previous_nodes: backendNodes,
@@ -239,7 +240,15 @@ export default function LifeWrap({ user }: { user: User }) {
           nodes={nodes}
           links={links}
           handleNodeClick={(nodeId: string) =>
-            onNodeClick(nodeId, config, nodes, links, setNodes, setLinks)
+            onNodeClick(
+              nodeId,
+              highlightedPath,
+              config,
+              nodes,
+              links,
+              setNodes,
+              setLinks,
+            )
           }
         />
       </div>
