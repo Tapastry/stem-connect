@@ -327,7 +327,7 @@ export default function LifeWrap({ user }: { user: User }) {
   const [config, setConfig] = useState({
     prompt: "",
     positivity: -1,
-    time_in_months: 1,
+    time_in_months: -1,
     type: "",
     num_nodes: 1,
   });

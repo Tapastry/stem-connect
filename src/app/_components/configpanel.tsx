@@ -67,7 +67,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
     setConfig({
       prompt: "",
       positivity: -1,
-      time_in_months: 1,
+      time_in_months: -1,
       type: "",
       num_nodes: 1,
     });
@@ -140,32 +140,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
             Adjust Parameters
           </h2>
 
-          {/* Time Range Dial */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="time_in_months" className="text-xs text-gray-400">
-                Time Range (months)
-              </label>
-              <span className="rounded-full bg-indigo-900/50 px-2 py-1 text-xs font-semibold text-indigo-300">
-                {config.time_in_months}
-              </span>
-            </div>
-            <input
-              id="time_in_months"
-              type="range"
-              min="1"
-              max="120"
-              value={config.time_in_months}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setConfig((prev: Config) => ({
-                  ...prev,
-                  time_in_months: parseInt(e.target.value),
-                }))
-              }
-              className="custom-range h-[6px] w-full cursor-pointer appearance-none rounded-lg bg-gray-600 transition-opacity outline-none hover:opacity-100"
-            />
-          </div>
-
           {/* Number of Nodes Dial */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -180,7 +154,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               id="num_nodes"
               type="range"
               min="1"
-              max="5"
+              max="10"
               value={config.num_nodes}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 setConfig((prev: Config) => ({
@@ -190,6 +164,56 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }
               className="custom-range h-[6px] w-full cursor-pointer appearance-none rounded-lg bg-gray-600 transition-opacity outline-none hover:opacity-100"
             />
+          </div>
+
+          {/* Time Range Control */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="time_in_months" className="text-xs text-gray-400">
+                Time Range{" "}
+                {/* DEBUG: time_in_months = {config.time_in_months} */}
+              </label>
+              <button
+                onClick={() =>
+                  setConfig((prev: Config) => ({
+                    ...prev,
+                    time_in_months: prev.time_in_months === -1 ? 1 : -1,
+                  }))
+                }
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-all duration-200 ${
+                  config.time_in_months === -1
+                    ? "bg-gray-600 text-gray-300 hover:bg-gray-500"
+                    : "bg-indigo-600 text-white hover:bg-indigo-500"
+                }`}
+                title={
+                  config.time_in_months === -1
+                    ? "Click to enable time control"
+                    : "Click to disable time control"
+                }
+              >
+                {config.time_in_months === -1
+                  ? "Random"
+                  : `${config.time_in_months} months`}
+              </button>
+            </div>
+            {config.time_in_months !== -1 && (
+              <div className="mb-4">
+                <input
+                  id="time_in_months"
+                  type="range"
+                  min="1"
+                  max="120"
+                  value={config.time_in_months}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setConfig((prev: Config) => ({
+                      ...prev,
+                      time_in_months: parseInt(e.target.value),
+                    }))
+                  }
+                  className="custom-range h-[6px] w-full cursor-pointer appearance-none rounded-lg bg-gray-600 transition-opacity outline-none hover:opacity-100"
+                />
+              </div>
+            )}
           </div>
 
           {/* Positivity Control */}
