@@ -1,6 +1,6 @@
 "use client";
 import type { User } from "next-auth";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ConfigPanel from "./configpanel";
 import Life from "./life";
 
