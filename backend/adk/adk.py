@@ -126,6 +126,27 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
     return live_events, live_request_queue
 
 
+async def generate_node_response(prompt: str, agent_name: str = "interviewer_agent") -> str:
+    """Runs a one-time prompt against a specified agent without maintaining chat history."""
+    agent_to_use = AGENT_MAP.get(agent_name)
+    if not agent_to_use:
+        raise ValueError(f"Agent '{agent_name}' not found.")
+
+    runner = InMemoryRunner(app_name=APP_NAME, agent=agent_to_use)
+    response = await runner.run_one_shot(prompt=prompt)
+    return response.output
+
+
+async def summarize_path_history(history: list[str]) -> str:
+    """Uses the summarizer agent to condense a list of historical events."""
+    if not history:
+        return ""
+
+    prompt = "Please summarize the following life events into a short paragraph:\\n\\n" + "\\n".join(history)
+    summary = await generate_node_response(prompt, agent_name="summarizer_agent")
+    return summary
+
+
 async def agent_to_client_sse(live_events: AsyncGenerator):
     """Yields Server-Sent Events from the agent's live events."""
     async for event in live_events:

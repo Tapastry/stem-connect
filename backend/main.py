@@ -4,8 +4,7 @@ from dataclasses import Field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# this might need to be changed to 'import adk' btw
-from . import adk
+import adk
 import psycopg2
 import uvicorn
 from dotenv import load_dotenv
@@ -13,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from models import AddNodeRequest, AddPersonalInformationRequest, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -35,73 +35,6 @@ app.add_middleware(
 security = HTTPBearer()
 
 nodes_db: Dict[str, dict] = {}
-
-
-# Pydantic models
-class Node(BaseModel):
-    id: Optional[str] = None
-    name: str
-    title: Optional[str] = None
-    type: str
-    imageName: Optional[str] = None
-    time: Optional[str] = None
-    description: Optional[str] = None
-    createdAt: Optional[datetime] = None
-    userId: str
-
-
-class Link(BaseModel):
-    id: Optional[str] = None
-    source: str
-    target: str
-    userId: str
-
-
-class PersonalInformation(BaseModel):
-    id: Optional[str] = None
-    age: Optional[int] = None
-    gender: Optional[str] = None
-    location: Optional[str] = None
-    interests: Optional[str] = None
-    skills: Optional[str] = None
-    name: str
-    title: Optional[str] = None
-    goal: Optional[str] = None
-    bio: Optional[str] = None
-    imageName: Optional[str] = None
-    userId: str
-
-
-class AddNodeRequest(BaseModel):
-    root: Node
-    num_nodes: int
-    edge_in_month: int
-    type: str
-    agent_type: Optional[str]
-
-
-class AddPersonalInformationRequest(BaseModel):
-    personalInformation: PersonalInformation
-
-
-class UpdatePersonalInformationRequest(BaseModel):
-    id: str
-    personalInformation: PersonalInformation
-
-
-class NodeRequest(BaseModel):
-    id: Optional[str] = None
-    user_id: str
-    agent_type: str = "interviewer_agent"
-    attached_nodes_ids: Optional[List[str]] = []
-    prompt_override: Optional[str] = None  # Allow custom prompts if needed
-
-
-class NodeResponse(BaseModel):
-    id: str
-    prompt: str
-    output: str
-    attached_node_ids: List[str]
 
 
 # ADK Agent Endpoints
@@ -157,9 +90,14 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
 @app.post("/api/add-node")
 async def add_node(request: AddNodeRequest):
     try:
-        # Create a prompt for node generation based on the root node and parameters
+        # Grab personal information from database
+        personal_information = await get_personal_information(request.user_id)
+
+        # Create a prompt for node generation based on the current node and parameters
         prompt = f"""
         Generate {request.num_nodes} life path decisions/scenarios based on this root node:
+        
+        Current Node: {request.root.name}
         
         Root Node: {request.root.name}
         Description: {request.root.description or "No description provided"}
@@ -199,7 +137,7 @@ async def create_node_with_context(request: NodeRequest):
             for parent_id in node_data.get("attached_node_ids", []):
                 gather_context_recursively(parent_id)
             if node_data.get("output"):
-                full_path_outputs.append(node_data['output'])
+                full_path_outputs.append(node_data["output"])
 
     for parent_id in request.attached_nodes_ids:
         gather_context_recursively(parent_id)
@@ -221,7 +159,7 @@ async def create_node_with_context(request: NodeRequest):
         summary_of_middle = ""
         if nodes_to_summarize:
             summary_of_middle = await adk.summarize_path_history(nodes_to_summarize)
-        
+
         context_string = f"""
         Here is the story so far:
         The story began with this event: "{root_node_text}"
@@ -231,7 +169,10 @@ async def create_node_with_context(request: NodeRequest):
     # --- End of Summarization Logic ---
 
     # Use custom prompt if provided, otherwise use default
-    prompt = request.prompt_override if request.prompt_override else f"""
+    prompt = (
+        request.prompt_override
+        if request.prompt_override
+        else f"""
     Given the life story context below, generate the next realistic life scenario or decision point that could follow.
     
     Context:
@@ -239,29 +180,17 @@ async def create_node_with_context(request: NodeRequest):
     
     Your task is to create the *next* logical event.
     """
-    
+    )
+
     try:
         # Generate the response using the specified agent
         output = await adk.generate_node_response(prompt, request.agent_type)
-        
+
         # Store the node in our database
-        nodes_db[node_id] = {
-            "id": node_id,
-            "user_id": request.user_id,
-            "prompt": prompt,
-            "output": output,
-            "attached_node_ids": request.attached_nodes_ids,
-            "agent_type": request.agent_type,
-            "created_at": datetime.now().isoformat()
-        }
-        
-        return NodeResponse(
-            id=node_id,
-            prompt=prompt,
-            output=output,
-            attached_node_ids=request.attached_nodes_ids
-        )
-    
+        nodes_db[node_id] = {"id": node_id, "user_id": request.user_id, "prompt": prompt, "output": output, "attached_node_ids": request.attached_nodes_ids, "agent_type": request.agent_type, "created_at": datetime.now().isoformat()}
+
+        return NodeResponse(id=node_id, prompt=prompt, output=output, attached_node_ids=request.attached_nodes_ids)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create node: {str(e)}")
 
@@ -291,16 +220,8 @@ async def get_personal_information(user_id: str):
 @app.get("/api/nodes/{user_id}")
 async def get_nodes(user_id: str):
     """Get all nodes for a specific user."""
-    user_nodes = {
-        node_id: node_data 
-        for node_id, node_data in nodes_db.items() 
-        if node_data.get("user_id") == user_id
-    }
-    return {
-        "user_id": user_id,
-        "nodes": user_nodes,
-        "total": len(user_nodes)
-    }
+    user_nodes = {node_id: node_data for node_id, node_data in nodes_db.items() if node_data.get("user_id") == user_id}
+    return {"user_id": user_id, "nodes": user_nodes, "total": len(user_nodes)}
 
 
 # Get all links for user from database
@@ -316,7 +237,7 @@ async def get_node(node_id: str):
     """Get a specific node by its ID."""
     if node_id not in nodes_db:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
+
     return nodes_db[node_id]
 
 
@@ -326,33 +247,25 @@ async def get_node_path(node_id: str):
     """Get the complete path history leading to this node."""
     if node_id not in nodes_db:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
+
     path = []
     current_node = nodes_db[node_id]
-    
+
     # Build the path by traversing backwards through attached nodes
     def build_path(node_data):
-        path.append({
-            "id": node_data["id"],
-            "output": node_data["output"],
-            "created_at": node_data.get("created_at")
-        })
-        
+        path.append({"id": node_data["id"], "output": node_data["output"], "created_at": node_data.get("created_at")})
+
         # Recursively add parent nodes
         for parent_id in node_data.get("attached_node_ids", []):
             if parent_id in nodes_db:
                 build_path(nodes_db[parent_id])
-    
+
     build_path(current_node)
-    
+
     # Reverse to get chronological order
     path.reverse()
-    
-    return {
-        "node_id": node_id,
-        "path": path,
-        "depth": len(path)
-    }
+
+    return {"node_id": node_id, "path": path, "depth": len(path)}
 
 
 # Delete a node and optionally its descendants
@@ -361,9 +274,9 @@ async def delete_node(node_id: str, delete_descendants: bool = False):
     """Delete a node and optionally all nodes that branch from it."""
     if node_id not in nodes_db:
         raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
+
     deleted_nodes = [node_id]
-    
+
     if delete_descendants:
         # Find all descendant nodes
         def find_descendants(parent_id):
@@ -371,17 +284,14 @@ async def delete_node(node_id: str, delete_descendants: bool = False):
                 if parent_id in node_data.get("attached_node_ids", []):
                     deleted_nodes.append(nid)
                     find_descendants(nid)  # Recursively find children
-        
+
         find_descendants(node_id)
-    
+
     # Delete all identified nodes
     for nid in deleted_nodes:
         del nodes_db[nid]
-    
-    return {
-        "deleted": deleted_nodes,
-        "count": len(deleted_nodes)
-    }
+
+    return {"deleted": deleted_nodes, "count": len(deleted_nodes)}
 
 
 # Get available AI agents

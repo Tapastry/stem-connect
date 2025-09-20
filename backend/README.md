@@ -36,7 +36,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 Once the server is running, open a **new terminal** and use this command to test the connection to the interview agent:
 
 ```bash
-curl -N http://localhost:8000/adk/events/123
+curl -H "Content-Type: application/json" http://localhost:8000/adk/events/123
 ```
 
 You should see the agent's welcome message stream to your terminal.
@@ -46,6 +46,7 @@ You should see the agent's welcome message stream to your terminal.
 You can test the context-aware branching by creating a few nodes in sequence.
 
 **Create the root node:**
+
 ```bash
 curl -X POST http://localhost:8000/api/nodes \\
 -H "Content-Type: application/json" \\
@@ -58,6 +59,7 @@ curl -X POST http://localhost:8000/api/nodes \\
 ```
 
 **Create a second node branching from the first:**
+
 ```bash
 curl -X POST http://localhost:8000/api/nodes \\
 -H "Content-Type: application/json" \\
@@ -69,6 +71,7 @@ curl -X POST http://localhost:8000/api/nodes \\
 ```
 
 **Create a third node to trigger summarization:**
+
 ```bash
 curl -X POST http://localhost:8000/api/nodes \\
 -H "Content-Type: application/json" \\
