@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# Start the backend API server in the background
-echo "Starting backend API server..."
+# Start the backend API server using the existing start_api.sh script
+echo "Starting backend API server with start_api.sh..."
 cd /app/backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+./start_api.sh &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start
-sleep 3
+sleep 5
 
 # Start the frontend server
 echo "Starting frontend server..."
 cd /app
-pnpm start &
+npm start &
 FRONTEND_PID=$!
 
 # Function to handle shutdown
