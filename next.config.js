@@ -7,7 +7,7 @@ import "./src/env.js";
 /** @type {import("next").NextConfig} */
 const config = {
   // Fix the lockfile warning by setting the correct root
-  outputFileTracingRoot: "/home/carlos/Development/stem-connect",
+  outputFileTracingRoot: "/home/carlos/Development/tapestry",
   // Enable long-running API routes for SSE
   serverExternalPackages: [],
   // Increase timeout for SSE connections
