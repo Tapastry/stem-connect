@@ -165,19 +165,36 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
 @app.get("/adk/session-status/{user_id}")
 async def get_session_status(user_id: str):
     """Check if a session exists for a user (for debugging)."""
-    return {"user_id": user_id, "session_exists": user_id in adk.active_sessions, "active_sessions": list(adk.active_sessions.keys()), "total_sessions": len(adk.active_sessions)}
+    return {
+        "user_id": user_id, 
+        "session_exists": user_id in adk.active_sessions, 
+        "initial_message_sent": user_id in adk.initial_message_sent,
+        "active_sessions": list(adk.active_sessions.keys()), 
+        "initial_messages_sent": list(adk.initial_message_sent.keys()),
+        "total_sessions": len(adk.active_sessions)
+    }
 
 
 @app.delete("/adk/session/{user_id}")
 async def cleanup_session(user_id: str):
     """Manually cleanup a session."""
-    if user_id in adk.active_sessions:
-        live_request_queue, _ = adk.active_sessions[user_id]
-        live_request_queue.close()
-        del adk.active_sessions[user_id]
-        return {"message": f"Session {user_id} cleaned up", "active_sessions": list(adk.active_sessions.keys())}
-    else:
-        return {"message": f"No session found for {user_id}", "active_sessions": list(adk.active_sessions.keys())}
+    try:
+        if user_id in adk.active_sessions:
+            live_request_queue, _, _ = adk.active_sessions[user_id]
+            live_request_queue.close()
+            del adk.active_sessions[user_id]
+        
+        # Also clear initial message tracking
+        if user_id in adk.initial_message_sent:
+            del adk.initial_message_sent[user_id]
+            
+        return {
+            "message": f"Session {user_id} cleaned up", 
+            "active_sessions": list(adk.active_sessions.keys()),
+            "initial_messages_sent": list(adk.initial_message_sent.keys())
+        }
+    except Exception as e:
+        return {"error": f"Failed to cleanup session: {str(e)}"}
 
 
 @app.post("/adk/check-completeness")
@@ -276,25 +293,27 @@ async def save_personal_info_endpoint(request: dict):
 
             if existing_record:
                 # If it exists, UPDATE it
-                cursor.execute(
-                    """
-                    UPDATE "stem-connect_personal_information"
-                    SET bio = %(bio)s,
-                        goal = %(goal)s,
-                        location = %(location)s,
-                        interests = %(interests)s,
-                        skills = %(skills)s,
-                        title = %(title)s,
-                        summary = %(summary)s,
-                        background = %(background)s,
-                        aspirations = %(aspirations)s,
-                        "values" = %(values)s,
-                        challenges = %(challenges)s
-                    WHERE "userId" = %(user_id)s
-                    """,
-                    {**personal_info, "user_id": user_id},
-                )
-                print(f"[DB] Updated personal information for user {user_id}")
+                        cursor.execute(
+                            """
+                            UPDATE "stem-connect_personal_information"
+                            SET name = %(name)s,
+                                gender = %(gender)s,
+                                bio = %(bio)s,
+                                goal = %(goal)s,
+                                location = %(location)s,
+                                interests = %(interests)s,
+                                skills = %(skills)s,
+                                title = %(title)s,
+                                summary = %(summary)s,
+                                background = %(background)s,
+                                aspirations = %(aspirations)s,
+                                "values" = %(values)s,
+                                challenges = %(challenges)s
+                            WHERE "userId" = %(user_id)s
+                            """,
+                            {**personal_info, "user_id": user_id},
+                        )
+                        print(f"[DB] Updated personal information for user {user_id}")
             else:
                 # If it doesn't exist, INSERT a new record
                 # Get user's name from the user table to satisfy NOT NULL constraint
@@ -307,10 +326,10 @@ async def save_personal_info_endpoint(request: dict):
                 cursor.execute(
                     """
                     INSERT INTO "stem-connect_personal_information"
-                    (id, "userId", name, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
-                    VALUES (%(id)s, %(user_id)s, %(name)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
+                    (id, "userId", name, gender, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
+                    VALUES (%(id)s, %(user_id)s, %(name)s, %(gender)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
                     """,
-                    {"id": new_id, "user_id": user_id, "name": user_name, **personal_info},
+                    {"id": new_id, "user_id": user_id, "name": personal_info.get("name", user_name), **personal_info},
                 )
                 print(f"[DB] Created personal information for user {user_id}")
             db.commit()

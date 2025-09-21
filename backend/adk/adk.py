@@ -23,7 +23,8 @@ from .interviewer import agent as interviewer_agent
 from .node_maker import agent as node_maker_agent
 from .reviewer import reviewer_agent
 
-active_sessions: Dict[str, Tuple[LiveRequestQueue, int]] = {}  # Now stores (queue, message_count)
+active_sessions: Dict[str, Tuple[LiveRequestQueue, int, bool]] = {}  # Now stores (queue, message_count, has_initial_message)
+initial_message_sent: Dict[str, bool] = {}  # Track if initial message was sent to each user
 
 APP_NAME = "Stem-Connect ADK Integration"
 
@@ -137,7 +138,7 @@ async def send_followup_questions_to_interviewer(user_id: str, suggested_questio
     if user_id not in active_sessions:
         return
 
-    live_request_queue, message_count = active_sessions[user_id]
+    live_request_queue, message_count, _ = active_sessions[user_id]
 
     questions_text = "\n".join([f"- {q}" for q in suggested_questions])
     guidance_prompt = f"""
@@ -150,20 +151,19 @@ Choose the most appropriate question and ask it naturally.
 
     guidance_content = Content(role="user", parts=[Part.from_text(text=guidance_prompt)])
     live_request_queue.send_content(content=guidance_content)
-    active_sessions[user_id] = (live_request_queue, message_count + 1)
+    active_sessions[user_id] = (live_request_queue, message_count + 1, True)
 
 
 async def get_or_create_session(user_id: str, is_audio: bool = False, force_new: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue, bool]:
     """Gets existing session or creates new one."""
-    if user_id in active_sessions and not force_new:
-        old_queue, message_count = active_sessions[user_id]
-        return None, old_queue, False
-
+    # Clean up existing session if forcing new or if one exists
     if user_id in active_sessions:
-        old_queue, _ = active_sessions[user_id]
+        old_queue, _, _ = active_sessions[user_id]
         old_queue.close()
         del active_sessions[user_id]
+        print(f"🔄 [SESSION] Cleaned up existing session for {user_id}")
 
+    print(f"🔄 [SESSION] Creating new session for {user_id}")
     runner = InMemoryRunner(app_name=APP_NAME, agent=interviewer_agent)
     session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id)
     modality = "AUDIO" if is_audio else "TEXT"
@@ -186,24 +186,36 @@ async def get_or_create_session(user_id: str, is_audio: bool = False, force_new:
         live_request_queue=live_request_queue,
         run_config=run_config,
     )
-    active_sessions[user_id] = (live_request_queue, 0)
+    active_sessions[user_id] = (live_request_queue, 0, False)
     return live_events, live_request_queue, True
 
 
 async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
     """Starts an agent session for a given user."""
-    live_events, live_request_queue, is_new = await get_or_create_session(user_id, is_audio, force_new=True)
-
-    message_count = active_sessions.get(user_id, (None, 0))[1]
-    should_send_initial = is_new and message_count == 0
-
+    print(f"🔄 [ADK] TEXT-ONLY MODE - is_audio will be ignored: {is_audio}")
+    
+    # Check if we've already sent initial message to this user
+    should_send_initial = user_id not in initial_message_sent
+    
+    live_events, live_request_queue, is_new = await get_or_create_session(user_id, False, force_new=False)
+    
+    # Send initial prompt only if we haven't sent it to this user before
     if should_send_initial:
-        initial_prompt = "Hello! Please introduce yourself and start the interview."
-        if is_audio:
-            initial_prompt += " The user will be speaking to you via voice."
+        initial_prompt = "Hello! Please introduce yourself and start the interview. The user will be typing their responses, and your responses will be read aloud to them. Please start by asking for their name and preferred pronouns."
+        print(f"🚀 [ADK] Sending initial prompt for new TEXT-ONLY interview session for user {user_id}")
 
         initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
         live_request_queue.send_content(content=initial_content)
+        
+        # Mark that initial message has been sent to this user
+        initial_message_sent[user_id] = True
+        
+        # Update session tracking
+        if user_id in active_sessions:
+            queue, msg_count, _ = active_sessions[user_id]
+            active_sessions[user_id] = (queue, msg_count, True)
+    else:
+        print(f"🔄 [ADK] Initial message already sent to user {user_id}, skipping")
 
     return live_events, live_request_queue
 
@@ -670,17 +682,19 @@ async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str
                     ).strip()
 
                     personal_info_data = {
+                        "name": args.get("user_name", "Unknown"),
+                        "gender": args.get("user_gender", "Not specified"),
                         "summary": summary_text,
-                        "background": args.get("background_info", ""),
-                        "aspirations": args.get("aspirations_info", ""),
-                        "values": args.get("values_info", ""),
-                        "challenges": args.get("challenges_info", ""),
+                        "background": args.get("background_info", "Not provided"),
+                        "aspirations": args.get("aspirations_info", "Not provided"),
+                        "values": args.get("values_info", "Not provided"),
+                        "challenges": args.get("challenges_info", "Not provided"),
                         "bio": summary_text,
-                        "goal": args.get("aspirations_info", ""),
-                        "location": args.get("user_location", ""),
-                        "interests": args.get("user_skills", ""),
-                        "skills": args.get("user_skills", ""),
-                        "title": args.get("user_title", ""),
+                        "goal": args.get("aspirations_info", "Not provided"),
+                        "location": args.get("user_location", "Not provided"),
+                        "interests": args.get("user_skills", "Not provided"),
+                        "skills": args.get("user_skills", "Not provided"),
+                        "title": args.get("user_title", "Not provided"),
                     }
 
                     yield f"data: {json.dumps({'interview_complete': True, 'personal_info_data': personal_info_data})}\n\n"
@@ -692,7 +706,7 @@ def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, 
     if not session_data:
         raise ValueError(f"Session not found for user {user_id}.")
 
-    live_request_queue, message_count = session_data
+    live_request_queue, message_count, has_initial = session_data
 
     if mime_type == "text/plain":
         content = Content(role="user", parts=[Part.from_text(text=data)])
@@ -705,7 +719,7 @@ def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, 
     else:
         raise ValueError(f"Mime type not supported: {mime_type}")
 
-    active_sessions[user_id] = (live_request_queue, message_count)
+    active_sessions[user_id] = (live_request_queue, message_count, has_initial)
 
     return {
         "message_count": message_count,
