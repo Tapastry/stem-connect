@@ -47,4 +47,11 @@ class PersonalInformation(BaseModel):
     goal: Optional[str] = None
     bio: Optional[str] = None
     imageName: Optional[str] = None
+    # New fields from interview agents
+    summary: Optional[str] = None
+    background: Optional[str] = None
+    aspirations: Optional[str] = None
+    values: Optional[str] = None
+    challenges: Optional[str] = None
+    fullConversation: Optional[str] = None
     userId: str

@@ -3,6 +3,7 @@ uvicorn
 pydantic
 python-dotenv
 google-adk
-psycopg2-binary
+psycopg2-binary==2.9.9
 google-generativeai
 minio
+google-cloud-aiplatform==1.56.0

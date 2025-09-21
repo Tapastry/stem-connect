@@ -94,6 +94,13 @@ export const personalInformation = createTable("personal_information", (d) => ({
   goal: d.text(),
   bio: d.text(),
   imageName: d.varchar({ length: 255 }),
+  // New fields from interview agents
+  summary: d.text(),
+  background: d.text(),
+  aspirations: d.text(),
+  values: d.text(),
+  challenges: d.text(),
+  fullConversation: d.text(),
   userId: d
     .varchar({ length: 255 })
     .notNull()
