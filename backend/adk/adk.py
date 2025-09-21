@@ -218,7 +218,7 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
         print(f"🚀 [ADK] Sending initial prompt for new TEXT-ONLY interview session for user {user_id}")
 
         initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
-    live_request_queue.send_content(content=initial_content)
+        live_request_queue.send_content(content=initial_content)
 
         # Mark that initial message has been sent to this user
         initial_message_sent[user_id] = True
