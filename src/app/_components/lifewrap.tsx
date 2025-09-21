@@ -707,13 +707,7 @@ export default function LifeWrap({ user }: { user: User }) {
         <div className="flex-1 overflow-hidden p-4">
           {screen === "graph" ? (
             <div className="h-full w-full">
-              <ConfigPanel
-                config={config}
-                setConfig={setConfig}
-                onGenerate={() => 1}
-                onReset={() => 1}
-                user={user}
-              />
+              <ConfigPanel config={config} setConfig={setConfig} user={user} />
             </div>
           ) : (
             <div className="flex h-full w-full flex-col gap-4 p-4">

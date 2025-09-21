@@ -62,4 +62,5 @@ export const authConfig = {
     signIn: "/",
   },
   secret: process.env.AUTH_SECRET,
+  trustHost: true, // Allow localhost for development
 } satisfies NextAuthConfig;

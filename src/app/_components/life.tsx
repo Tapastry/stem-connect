@@ -1,4 +1,4 @@
-/* eslint-disable react/jsx-no-duplicate-props */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
@@ -42,14 +42,6 @@ interface Link {
   source: string;
   target: string;
   timeInMonths?: number;
-}
-
-interface Config {
-  prompt: string;
-  positivity: number;
-  time_in_months: number;
-  type: string;
-  num_nodes: number;
 }
 
 interface LifeProps {
@@ -99,7 +91,7 @@ export default function Life({
 
     console.log("LINKS: ", map);
     nodes.forEach((node: Node) => {
-      if (node.id == "Now" || node.id.startsWith("Now-")) {
+      if (node.id === "Now" || node.id.startsWith("Now-")) {
         colors[node.id] = "yellow"; // "Now" node is yellow
         return;
       }
@@ -180,7 +172,7 @@ export default function Life({
             const group = new THREE.Group();
 
             // Use the memoized color that won't change on hover
-            const color = nodeColors[node.id] || "green";
+            const color = nodeColors[node.id] ?? "green";
 
             // === Base size from nodeVal logic ===
             const radius =
@@ -273,6 +265,7 @@ export default function Life({
               setHighlightedPath?.(highlightPath);
 
               // refresh the graph canvas only, no React re-render
+              // @ts-expect-error
               fgRef.current?.refresh();
             }
           }}
@@ -316,8 +309,11 @@ export default function Life({
           }}
           onEngineStart={() => {
             // Set initial physics parameters for stability
+            // @ts-expect-error
             if (fgRef.current) {
+              // @ts-expect-error
               fgRef.current.d3Force("charge").strength(-50);
+              // @ts-expect-error
               fgRef.current.d3Force("center", null);
             }
           }}

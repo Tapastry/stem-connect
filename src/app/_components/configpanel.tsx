@@ -4,7 +4,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 import React from "react";
 import { nodeTypes } from "../../consts/consts";
 
@@ -20,16 +19,12 @@ interface Config {
 interface ConfigPanelProps {
   config: Config;
   setConfig: (config: Config | ((prev: Config) => Config)) => void;
-  onGenerate?: (config: Config) => void;
-  onReset?: () => void;
   user: any; // Add user prop
 }
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
   setConfig,
-  onGenerate,
-  onReset,
   user,
 }) => {
   // Get currently selected node types as an array
@@ -63,30 +58,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       ...prev,
       type: newSelectedTypes.join(","),
     }));
-  };
-
-  const handleGenerateClick = () => {
-    if (onGenerate) {
-      onGenerate(config);
-    }
-    console.log("Generating life graph with:", config);
-  };
-
-  const handleResetClick = () => {
-    // Enable all node types by default
-    const allNodeTypeIds = nodeTypes.map((nt) => nt.id).join(",");
-
-    setConfig({
-      prompt: "",
-      positivity: -1,
-      time_in_months: -1,
-      type: allNodeTypeIds,
-      num_nodes: 1,
-    });
-    if (onReset) {
-      onReset();
-    }
-    console.log("Resetting controls");
   };
 
   return (
