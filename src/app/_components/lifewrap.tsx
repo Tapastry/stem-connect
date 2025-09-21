@@ -685,7 +685,7 @@ export default function LifeWrap({ user }: { user: User }) {
 
   return (
     <div className="flex h-screen w-screen">
-      <div className="flex h-full w-1/3 flex-col border-r border-white/10 bg-black/50 backdrop-blur-sm shadow-lg shadow-indigo-500/10">
+      <div className="flex h-full w-1/3 flex-col border-r border-white/10 bg-black/50 backdrop-blur-sm shadow-lg">
         {/* Tab Navigation */}
         <div className="flex w-full border-b border-white/10 bg-black/25 p-4">
           {types.map((type, idx) => (

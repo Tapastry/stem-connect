@@ -86,7 +86,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
       </style>
 
       {/* Control Panel Component */}
-      <div className="flex h-full w-full flex-col gap-4 bg-gray-900 font-sans">
+      <div className="flex h-full w-full flex-col gap-4 bg-transparent font-sans">
         {/* Header */}
         <div className="text-center">
           <h1 className="text-xl font-bold text-white">Life Graph Console</h1>
@@ -96,7 +96,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </div>
 
         {/* Node Controls Bar */}
-        <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
           <h2 className="mb-3 text-sm font-medium text-gray-300">
             Node Controls
           </h2>
@@ -195,14 +195,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               };
               input.click();
             }}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white transition duration-150 hover:bg-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            className="rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 px-4 py-2 text-sm text-white transition-all hover:from-blue-600 hover:to-purple-700"
           >
             Update Profile Image
           </button>
         </div>
 
         {/* Parameter Controls */}
-        <div className="flex flex-col gap-4 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+        <div className="flex flex-col gap-4 rounded-lg border border-white/10 bg-white/5 p-3">
           <h2 className="text-sm font-medium text-gray-300">
             Adjust Parameters
           </h2>
@@ -213,7 +213,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
               <label htmlFor="num_nodes" className="text-xs text-gray-400">
                 Number of Nodes
               </label>
-              <span className="rounded-full bg-indigo-900/50 px-2 py-1 text-xs font-semibold text-indigo-300">
+              <span className="rounded-full bg-blue-500/20 px-2 py-1 text-xs font-semibold text-blue-300">
                 {config.num_nodes}
               </span>
             </div>
@@ -250,7 +250,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 className={`rounded-md px-3 py-1 text-xs font-medium transition-all duration-200 ${
                   config.time_in_months === -1
                     ? "bg-gray-600 text-gray-300 hover:bg-gray-500"
-                    : "bg-indigo-600 text-white hover:bg-indigo-500"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
                 }`}
                 title={
                   config.time_in_months === -1
@@ -299,7 +299,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 className={`rounded-md px-3 py-1 text-xs font-medium transition-all duration-200 ${
                   config.positivity === -1
                     ? "bg-gray-600 text-gray-300 hover:bg-gray-500"
-                    : "bg-indigo-600 text-white hover:bg-indigo-500"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
                 }`}
                 title={
                   config.positivity === -1
@@ -332,7 +332,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </div>
 
         {/* Node Type Toggles */}
-        <div className="flex flex-1 flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+        <div className="flex flex-1 flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
           <h2 className="text-sm font-medium text-gray-300">
             Life Event Types
           </h2>
@@ -345,7 +345,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   onClick={() => handleNodeTypeToggle(nodeType.id)}
                   className={`rounded-md px-2 py-2 text-xs transition-colors duration-150 ${
                     isSelected
-                      ? "bg-indigo-600 text-white"
+                      ? "bg-blue-600 text-white"
                       : "bg-gray-600 text-gray-300 hover:bg-gray-500"
                   }`}
                   title={nodeType.description}
@@ -364,7 +364,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </div>
 
         {/* Prompt Input */}
-        <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+        <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
           <label htmlFor="prompt" className="text-sm font-medium text-gray-300">
             Additional Context
           </label>
@@ -379,7 +379,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 prompt: e.target.value,
               }))
             }
-            className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            className="w-full rounded-md border-white/20 bg-white/5 px-3 py-2 text-sm text-white transition duration-150 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
           />
         </div>
       </div>

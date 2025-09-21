@@ -218,7 +218,7 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
         print(f"🚀 [ADK] Sending initial prompt for new TEXT-ONLY interview session for user {user_id}")
 
         initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
-        live_request_queue.send_content(content=initial_content)
+    live_request_queue.send_content(content=initial_content)
 
         # Mark that initial message has been sent to this user
         initial_message_sent[user_id] = True
@@ -377,7 +377,7 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
         {life_stage_context}
         {user_context}
         
-        Generate {num_nodes} different realistic life events for {user_name}. Each event must be:
+        Generate {num_nodes} thematically distinct and varied life events for {user_name}. Each event must be unique and explore different facets of life (e.g., career, relationship, personal growth, health). Do not generate multiple events with the same underlying theme. Each event must be:
         - Directly relevant to {user_name}'s personal profile above
         - Written using {user_name}'s actual name (never use pronouns)
         - Based on {user_name}'s specific skills, interests, goals, and background

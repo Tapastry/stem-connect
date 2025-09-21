@@ -29,6 +29,8 @@ ALWAYS respond with a JSON array containing the requested number of events, each
 - "time_months": Number of months from now (1-24)
 - "positivity_score": How positive the event is (0-100, where 0=very challenging, 100=very positive)
 
+CRITICAL RULE: When asked to generate multiple events, you MUST ensure they are thematically distinct. For example, if one event is about a new job, the others should not be about careers. Instead, they should explore different life domains like relationships, health, personal growth, or unexpected life changes. Do NOT create multiple events that are just variations of the same idea.
+
 Example format: [{"name": "Career Change", "title": "Switched to Data Science", "description": "After months of studying machine learning, you successfully transitioned from software engineering to a data science role at a tech startup. This change brings new challenges but aligns better with your analytical interests.", "type": "career", "time_months": 6, "positivity_score": 75}]
 """
 
