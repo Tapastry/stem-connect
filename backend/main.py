@@ -18,13 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from models import AddNodeRequest, AddPersonalInformationRequest, Link, Node, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
-from models.requests import (
-    AddNodeRequest,
-    InterviewCompletenessRequest,
-    UpdateNodeRequest,
-    AddPersonalInformationRequest,
-    UpdatePersonalInformationRequest
-)
+from models.requests import AddNodeRequest, AddPersonalInformationRequest, InterviewCompletenessRequest, UpdateNodeRequest, UpdatePersonalInformationRequest
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -194,10 +188,8 @@ async def check_interview_completeness_endpoint(request: InterviewCompletenessRe
     print(f"[COMPLETENESS] Received request for user: {request.user_id}")
     print(f"[COMPLETENESS] Conversation history length: {len(request.conversation_history)}")
     print(f"[COMPLETENESS] Sample conversation: {request.conversation_history[:2] if request.conversation_history else 'Empty'}")
-    
-    result = await adk.check_interview_completeness(
-        request.user_id, request.conversation_history
-    )
+
+    result = await adk.check_interview_completeness(request.user_id, request.conversation_history)
     if result.get("is_complete"):
         personal_info_data = result.get("personal_info_data")
         if personal_info_data:
@@ -237,13 +229,10 @@ async def check_interview_completeness_endpoint(request: InterviewCompletenessRe
                     else:
                         # If it doesn't exist, INSERT a new record
                         # Get user's name from the user table to satisfy NOT NULL constraint
-                        cursor.execute(
-                            'SELECT name FROM "stem-connect_user" WHERE id = %s',
-                            (request.user_id,)
-                        )
+                        cursor.execute('SELECT name FROM "stem-connect_user" WHERE id = %s', (request.user_id,))
                         user_record = cursor.fetchone()
                         user_name = user_record[0] if user_record else "New User"
-                        
+
                         new_id = str(uuid.uuid4())
 
                         cursor.execute(
@@ -252,20 +241,13 @@ async def check_interview_completeness_endpoint(request: InterviewCompletenessRe
                             (id, "userId", name, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
                             VALUES (%(id)s, %(user_id)s, %(name)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
                             """,
-                            {
-                                "id": new_id,
-                                "user_id": request.user_id,
-                                "name": user_name,
-                                **personal_info_data
-                            },
+                            {"id": new_id, "user_id": request.user_id, "name": user_name, **personal_info_data},
                         )
                         print(f"[DB] Created personal information for user {request.user_id}")
                     db.commit()
             except Exception as e:
                 db.rollback()
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to save personal information: {e}"
-                )
+                raise HTTPException(status_code=500, detail=f"Failed to save personal information: {e}")
     return result
 
 
@@ -276,10 +258,10 @@ async def save_personal_info_endpoint(request: dict):
     """
     user_id = request.get("user_id")
     personal_info = request.get("personal_info", {})
-    
+
     print(f"[SAVE PERSONAL INFO] Received data for user: {user_id}")
     print(f"[SAVE PERSONAL INFO] Data: {personal_info}")
-    
+
     try:
         with db.cursor() as cursor:
             # First, check if a record already exists for this user
@@ -316,13 +298,10 @@ async def save_personal_info_endpoint(request: dict):
             else:
                 # If it doesn't exist, INSERT a new record
                 # Get user's name from the user table to satisfy NOT NULL constraint
-                cursor.execute(
-                    'SELECT name FROM "stem-connect_user" WHERE id = %s',
-                    (user_id,)
-                )
+                cursor.execute('SELECT name FROM "stem-connect_user" WHERE id = %s', (user_id,))
                 user_record = cursor.fetchone()
                 user_name = user_record[0] if user_record else "New User"
-                
+
                 new_id = str(uuid.uuid4())
 
                 cursor.execute(
@@ -331,23 +310,16 @@ async def save_personal_info_endpoint(request: dict):
                     (id, "userId", name, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
                     VALUES (%(id)s, %(user_id)s, %(name)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
                     """,
-                    {
-                        "id": new_id,
-                        "user_id": user_id,
-                        "name": user_name,
-                        **personal_info
-                    },
+                    {"id": new_id, "user_id": user_id, "name": user_name, **personal_info},
                 )
                 print(f"[DB] Created personal information for user {user_id}")
             db.commit()
-            
+
         return {"message": "Personal information saved successfully"}
-        
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=500, detail=f"Failed to save personal information: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to save personal information: {e}")
 
 
 # Generate a Node with AI, Insert to database, and return the node
@@ -504,21 +476,37 @@ async def get_graph(user_id: str):
 # Instantiate a "You" node for a user if it doesn't exist
 @app.post("/api/instantiate/{user_id}")
 async def instantiate_user_node(user_id: str):
-    """Create a 'You' node at origin (0,0,0) if it doesn't already exist."""
+    """Create a 'Now' node for the user if it doesn't already exist."""
     try:
         with db.cursor() as cursor:
-            # Try to insert the "You" node, ignore if it already exists
+            # Check if the user already has a "Now" node (could be "Now" or "Now-{user_id}")
             cursor.execute(
                 """
-                INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", "imageUrl", "timeInMonths", description, "createdAt", "userId") 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
+                SELECT id FROM "stem-connect_node" 
+                WHERE (id = %s OR id = %s) AND "userId" = %s
                 """,
-                ("Now", "Now", "Your Current Position in Life", "self", "", "", 0, "This represents your current position in life", datetime.now(), user_id),
+                ("Now", f"Now-{user_id}", user_id),
             )
-            db.commit()
 
-            return {"message": "You node instantiated", "node_id": "You", "user_id": user_id}
+            existing_node = cursor.fetchone()
+
+            if not existing_node:
+                # Create a unique node ID for this user's "Now" node
+                unique_node_id = f"Now-{user_id}"
+
+                # Insert the "Now" node for this specific user
+                cursor.execute(
+                    """
+                    INSERT INTO "stem-connect_node" (id, name, title, type, "imageName", "imageUrl", "timeInMonths", description, "createdAt", "userId") 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (unique_node_id, "Now", "Your Current Position in Life", "self", "", "", 0, "This represents your current position in life", datetime.now(), user_id),
+                )
+                db.commit()
+
+                return {"message": "Now node created", "node_id": unique_node_id, "user_id": user_id, "created": True}
+            else:
+                return {"message": "Now node already exists", "node_id": "Now", "user_id": user_id, "created": False}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to instantiate user node: {str(e)}")
@@ -529,9 +517,9 @@ async def instantiate_user_node(user_id: str):
 async def delete_node(user_id: str, node_id: str):
     """Delete a node and all nodes that become unreachable from 'Now'."""
     try:
-        # Check if they are trying to delete the "You" node
-        if node_id == "You":
-            raise HTTPException(status_code=400, detail="Cannot delete the 'You' node")
+        # Check if they are trying to delete the "Now" node
+        if node_id == "Now" or node_id.startswith("Now-"):
+            raise HTTPException(status_code=400, detail="Cannot delete the 'Now' node")
 
         with db.cursor(cursor_factory=RealDictCursor) as cursor:
             # First, check if the node exists and belongs to the user
@@ -545,10 +533,6 @@ async def delete_node(user_id: str, node_id: str):
 
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail=f"Node {node_id} not found for user {user_id}")
-
-            # Don't allow deletion of the root "Now" node
-            if node_id == "Now":
-                raise HTTPException(status_code=400, detail="Cannot delete the root 'Now' node")
 
             # Get all nodes and links for the user
             cursor.execute(
@@ -580,9 +564,15 @@ async def delete_node(user_id: str, node_id: str):
                     if source == current_node and target != node_id:
                         dfs_from_now(target)
 
-            # Start DFS from "Now" node
-            if "Now" in all_nodes:
-                dfs_from_now("Now")
+            # Start DFS from "Now" node (could be "Now" or "Now-{user_id}")
+            now_node = None
+            for node in all_nodes:
+                if node == "Now" or node.startswith("Now-"):
+                    now_node = node
+                    break
+
+            if now_node:
+                dfs_from_now(now_node)
 
             # Find nodes that will become unreachable
             unreachable_nodes = all_nodes - reachable_nodes

@@ -24,7 +24,7 @@ export function getHighlightPath(nodeID: string, links: Link[]): string[] {
     visited.add(node);
     path.push(node);
 
-    if (node === "Now") return true;
+    if (node === "Now" || node.startsWith("Now-")) return true;
 
     const sources = map.get(node) ?? [];
     for (const src of sources) {

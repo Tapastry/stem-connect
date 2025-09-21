@@ -34,6 +34,33 @@ interface Link {
   timeInMonths?: number;
 }
 
+// Helper function to create clean display names
+const getDisplayName = (node: Node): string => {
+  // For "Now" nodes, always show "Now" regardless of the actual ID
+  if (node.id === "Now" || node.id.startsWith("Now-")) {
+    return "Now";
+  }
+
+  // For other nodes, use the name if available, otherwise use a cleaned version of the ID
+  if (node.name && node.name !== node.id) {
+    return node.name;
+  }
+
+  // If the ID contains user ID patterns, clean them up
+  let cleanId = node.id;
+
+  // Remove user ID suffixes (long UUID patterns)
+  cleanId = cleanId.replace(
+    /-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i,
+    "",
+  );
+
+  // Remove timestamp patterns
+  cleanId = cleanId.replace(/-\d{14}-[a-zA-Z]{2}-\d+$/i, "");
+
+  return cleanId || node.id; // Fallback to original ID if cleaning results in empty string
+};
+
 interface Config {
   prompt: string;
   positivity: number;
@@ -61,7 +88,12 @@ const onNodeClick = async (
   isGenerating: boolean,
   setIsGenerating: (generating: boolean) => void,
 ) => {
-  console.log("NODE CLICKED", clickedNodeId, config);
+  const clickedNodeForLog = currentNodes.find((n) => n.id === clickedNodeId);
+  console.log(
+    "NODE CLICKED",
+    clickedNodeForLog ? getDisplayName(clickedNodeForLog) : clickedNodeId,
+    config,
+  );
 
   // Prevent multiple clicks while generating
   if (isGenerating) {
@@ -258,12 +290,17 @@ const onNodeClick = async (
 const onNodeDelete = async (
   nodeId: string,
   user: User,
+  currentNodes: Node[],
   setNodes: (nodes: Node[]) => void,
   setLinks: (links: Link[]) => void,
   setNodesToView: (nodes: Node[]) => void,
   setScreen: (screen: string) => void,
 ) => {
-  console.log("DELETING NODE", nodeId);
+  const nodeToDelete = currentNodes.find((n) => n.id === nodeId);
+  console.log(
+    "DELETING NODE",
+    nodeToDelete ? getDisplayName(nodeToDelete) : nodeId,
+  );
 
   try {
     const response = await fetch(
@@ -299,10 +336,14 @@ const onNodeDelete = async (
         y: Math.random() * 10 - 5,
         z: Math.random() * 10 - 5,
         color:
-          dbNode.id === "You" || dbNode.id === "Now"
+          dbNode.id === "You" ||
+          dbNode.id === "Now" ||
+          dbNode.id.startsWith("Now-")
             ? "yellow"
             : `hsl(${Math.random() * 360}, 70%, 60%)`,
-        ...((dbNode.id === "You" || dbNode.id === "Now") && {
+        ...((dbNode.id === "You" ||
+          dbNode.id === "Now" ||
+          dbNode.id.startsWith("Now-")) && {
           fx: 0,
           fy: 0,
           fz: 0,
@@ -362,7 +403,11 @@ const calculatePathToRoot = (
     pathIds.push(currentNodeId);
 
     // If we reached the root, stop
-    if (currentNodeId === "Now" || currentNodeId === "You") {
+    if (
+      currentNodeId === "Now" ||
+      currentNodeId === "You" ||
+      currentNodeId.startsWith("Now-")
+    ) {
       break;
     }
 
@@ -390,7 +435,11 @@ const onNodeViewClick = (
   setNodesToView: (nodes: Node[]) => void,
   setScreen: (screen: string) => void,
 ) => {
-  console.log("Setting node view for:", nodeId);
+  const nodeToView = nodes.find((n) => n.id === nodeId);
+  console.log(
+    "Setting node view for:",
+    nodeToView ? getDisplayName(nodeToView) : nodeId,
+  );
   console.log("Using highlighted path:", highlightedPath);
 
   // Convert highlighted path IDs to full node objects
@@ -405,7 +454,7 @@ const onNodeViewClick = (
   setNodesToView(pathNodes);
 
   // Switch to node view tab
-  if (nodeId === "Now") {
+  if (nodeId === "Now" || nodeId.startsWith("Now-")) {
     setScreen("graph");
   } else {
     setScreen("nodes");
@@ -503,7 +552,7 @@ export default function LifeWrap({ user }: { user: User }) {
   useEffect(() => {
     const loadGraphData = async () => {
       try {
-        // First, ensure the "You" node exists
+        // First, ensure the "Now" node exists
         await fetch(`http://localhost:8000/api/instantiate/${user.id}`, {
           method: "POST",
         });
@@ -515,10 +564,10 @@ export default function LifeWrap({ user }: { user: User }) {
 
         if (!response.ok) {
           console.error("Failed to load graph data:", response.status);
-          // If no data exists, start with initial "You" node
+          // If no data exists, start with initial "Now" node
           setNodes([
             {
-              id: "You",
+              id: "Now",
               x: 0,
               y: 0,
               z: 0,
@@ -544,10 +593,14 @@ export default function LifeWrap({ user }: { user: User }) {
           y: Math.random() * 10 - 5,
           z: Math.random() * 10 - 5,
           color:
-            dbNode.id === "Now" || dbNode.id === "You"
+            dbNode.id === "Now" ||
+            dbNode.id === "You" ||
+            dbNode.id.startsWith("Now-")
               ? "yellow"
               : `hsl(${Math.random() * 360}, 70%, 60%)`,
-          ...((dbNode.id === "Now" || dbNode.id === "You") && {
+          ...((dbNode.id === "Now" ||
+            dbNode.id === "You" ||
+            dbNode.id.startsWith("Now-")) && {
             fx: 0,
             fy: 0,
             fz: 0,
@@ -678,7 +731,7 @@ export default function LifeWrap({ user }: { user: User }) {
                           <div className="flex-shrink-0">
                             <Image
                               src={node.imageUrl}
-                              alt={node.title || node.name || node.id}
+                              alt={getDisplayName(node)}
                               width={80}
                               height={80}
                               className="cursor-pointer rounded-lg object-cover transition-opacity hover:opacity-80"
@@ -686,7 +739,7 @@ export default function LifeWrap({ user }: { user: User }) {
                               onClick={() =>
                                 setModalImage({
                                   url: node.imageUrl!,
-                                  alt: node.title || node.name || node.id,
+                                  alt: getDisplayName(node),
                                 })
                               }
                             />
@@ -697,7 +750,7 @@ export default function LifeWrap({ user }: { user: User }) {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <h3 className="font-semibold text-white">
-                              {node.title || node.name || node.id}
+                              {getDisplayName(node)}
                             </h3>
                             {index === 0 && (
                               <span className="rounded-full bg-indigo-600 px-2 py-1 text-xs text-white">
@@ -794,6 +847,7 @@ export default function LifeWrap({ user }: { user: User }) {
             onNodeDelete(
               nodeId,
               user,
+              nodes,
               setNodes,
               setLinks,
               setNodesToView,
@@ -810,6 +864,7 @@ export default function LifeWrap({ user }: { user: User }) {
             );
           }}
           fgRef={fgRef}
+          getDisplayName={getDisplayName}
         />
       </div>
 

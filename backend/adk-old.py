@@ -41,6 +41,7 @@ minio_client = Minio(
 )
 
 # Initialize Gemini for image generation
+# Load environment variables
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,7 +53,7 @@ if GEMINI_API_KEY:
     image_model = genai.GenerativeModel("gemini-2.5-flash")
     print(f"[IMAGE GEN] Gemini configured successfully")
 
-# Agent registry
+# Agent registry - map of agent names to agent instances
 AGENT_MAP = {
     "interviewer_agent": interviewer_agent,
     "node_maker_agent": node_maker_agent,
@@ -75,102 +76,126 @@ def get_available_agents() -> list:
 
 async def create_one_time_session(prompt: str, agent_type: str = "interviewer_agent", is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
     """Creates a one-time session for generating nodes without chat history."""
+
+    # Get the specified agent
     selected_agent = get_agent(agent_type)
+
+    # Generate a unique session ID for this one-time request
     session_id = str(uuid.uuid4())
-    runner = InMemoryRunner(app_name=APP_NAME, agent=selected_agent)
-    session = await runner.session_service.create_session(app_name=APP_NAME, user_id=session_id)
+
+    # Create a Runner
+    runner = InMemoryRunner(
+        app_name=APP_NAME,
+        agent=selected_agent,
+    )
+
+    # Create a fresh session with unique ID
+    session = await runner.session_service.create_session(
+        app_name=APP_NAME,
+        user_id=session_id,
+    )
+
+    # response modality
     modality = "AUDIO" if is_audio else "TEXT"
-    run_config = RunConfig(response_modalities=[modality])
+    run_config = RunConfig(
+        response_modalities=[modality],
+        # No session resumption - each request is independent
+    )
+
     live_request_queue = LiveRequestQueue()
-    live_events = runner.run_live(session=session, live_request_queue=live_request_queue, run_config=run_config)
+
+    # Start the agent session
+    live_events = runner.run_live(
+        session=session,
+        live_request_queue=live_request_queue,
+        run_config=run_config,
+    )
+
+    print(f"One-time ADK session created: {session_id} with agent: {agent_type}")
+
+    # Send the provided prompt directly
     initial_content = Content(role="user", parts=[Part.from_text(text=prompt)])
     live_request_queue.send_content(content=initial_content)
+    print(f"[PROMPT SENT TO AGENT ({agent_type})]: {prompt[:100]}...")
+
     return live_events, live_request_queue
 
 
-async def check_interview_completeness(user_id: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Check if the interview has gathered enough information using the reviewer agent."""
-    conversation_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in conversation_history])
+async def check_interview_completeness(user_id: str, conversation_history: str) -> Dict[str, Any]:
+    """
+    Check if the interview has gathered enough information using the reviewer agent.
 
+    Returns a dictionary with completeness assessment.
+    """
+    prompt = f"""
+    Please analyze this interview conversation and determine if sufficient information has been gathered.
+    Return your assessment in JSON format.
+    
+    Conversation History:
+    {conversation_history}
+    """
+
+    runner = InMemoryRunner(app_name=APP_NAME, agent=reviewer_agent)
+    response = await runner.run_one_shot(prompt=prompt)
+
+    # Try to parse the JSON response
     try:
-        runner = InMemoryRunner(app_name=APP_NAME, agent=reviewer_agent)
-        session = await runner.session_service.create_session(app_name=APP_NAME, user_id=f"reviewer_{user_id}_{uuid.uuid4().hex[:8]}")
-        user_content = types.Content(role="user", parts=[types.Part(text=conversation_str)])
+        import json
 
-        full_response = ""
-        async for event in runner.run_async(user_id=session.user_id, session_id=session.session_id, new_message=user_content):
-            if event.is_final_response() and event.content and event.content.parts:
-                full_response = event.content.parts[0].text
-                break
-
-        cleaned_response = full_response.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response.replace("```json", "").replace("```", "").strip()
-
-        response_data = json.loads(cleaned_response)
-
-        if response_data.get("is_complete"):
-            personal_info_data = {
-                "bio": response_data.get("bio", ""),
-                "goal": response_data.get("goal", ""),
-                "location": response_data.get("location", ""),
-                "interests": response_data.get("interests", ""),
-                "skills": response_data.get("skills", ""),
-                "title": response_data.get("title", ""),
-            }
-            return {"is_complete": True, "personal_info_data": personal_info_data}
-        else:
-            suggested_questions = response_data.get("suggested_questions", [])
-            if suggested_questions:
-                await send_followup_questions_to_interviewer(user_id, suggested_questions)
-
-            return {"is_complete": False, "reason": response_data.get("reason", "Unknown"), "suggested_questions": suggested_questions}
-
-    except json.JSONDecodeError as e:
-        return {"error": "Failed to decode JSON from reviewer agent", "raw_response": full_response}
-    except Exception as e:
-        return {"error": f"An unexpected error occurred: {e}"}
-
-
-async def send_followup_questions_to_interviewer(user_id: str, suggested_questions: List[str]):
-    """Send follow-up questions to the interviewer agent to continue the conversation."""
-    if user_id not in active_sessions:
-        return
-
-    live_request_queue, message_count = active_sessions[user_id]
-
-    questions_text = "\n".join([f"- {q}" for q in suggested_questions])
-    guidance_prompt = f"""
-The reviewer has identified that more information is needed. Please ask one of these follow-up questions:
-
-{questions_text}
-
-Choose the most appropriate question and ask it naturally.
-"""
-
-    guidance_content = Content(role="user", parts=[Part.from_text(text=guidance_prompt)])
-    live_request_queue.send_content(content=guidance_content)
-    active_sessions[user_id] = (live_request_queue, message_count + 1)
+        # Find JSON in the response (it might be wrapped in text)
+        response_text = response.output
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}") + 1
+        if json_start != -1 and json_end > json_start:
+            json_str = response_text[json_start:json_end]
+            return json.loads(json_str)
+    except:
+        # If parsing fails, return a default response
+        return {"is_complete": False, "completeness_score": 0.0, "reason": "Unable to parse completeness check"}
 
 
 async def get_or_create_session(user_id: str, is_audio: bool = False, force_new: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue, bool]:
-    """Gets existing session or creates new one."""
+    """Gets existing session or creates new one. Returns (events, queue, is_new_session)"""
+
+    # Check if session already exists and we don't want to force a new one
     if user_id in active_sessions and not force_new:
+        print(f"Reusing existing session for user: {user_id}")
         old_queue, message_count = active_sessions[user_id]
+        # For existing sessions, we need to create a new event stream but keep the queue
         return None, old_queue, False
 
+    # Close existing session if it exists
     if user_id in active_sessions:
         old_queue, _ = active_sessions[user_id]
         old_queue.close()
         del active_sessions[user_id]
+        print(f"Closed existing session for user: {user_id}")
 
-    runner = InMemoryRunner(app_name=APP_NAME, agent=interviewer_agent)
-    session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id)
+    # Create a Runner
+    runner = InMemoryRunner(
+        app_name=APP_NAME,
+        agent=interviewer_agent,
+    )
+
+    # session maker
+    session = await runner.session_service.create_session(
+        app_name=APP_NAME,
+        user_id=user_id,
+    )
+
+    # response modality and speech configuration
     modality = "AUDIO" if is_audio else "TEXT"
 
+    # Configure speech for voice responses
     speech_config = None
     if is_audio:
-        speech_config = SpeechConfig(voice_config=VoiceConfig(prebuilt_voice_config=PrebuiltVoiceConfig(voice_name="Aoede")))
+        speech_config = SpeechConfig(
+            voice_config=VoiceConfig(
+                prebuilt_voice_config=PrebuiltVoiceConfig(
+                    voice_name="Aoede"  # A pleasant, natural-sounding voice
+                )
+            )
+        )
 
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI if is_audio else StreamingMode.SSE,
@@ -178,64 +203,68 @@ async def get_or_create_session(user_id: str, is_audio: bool = False, force_new:
         speech_config=speech_config,
         output_audio_transcription=AudioTranscriptionConfig() if is_audio else None,
         input_audio_transcription=AudioTranscriptionConfig() if is_audio else None,
+        # Removed session_resumption to prevent duplicate messages during reconnection
+        # session_resumption=types.SessionResumptionConfig(),
     )
 
+    print(f"🔧 RunConfig created - streaming_mode: {run_config.streaming_mode}, session_resumption: disabled")
+
     live_request_queue = LiveRequestQueue()
+
+    # Start the agent session
     live_events = runner.run_live(
         session=session,
         live_request_queue=live_request_queue,
         run_config=run_config,
     )
+
+    # Store the request queue and message count for this user
     active_sessions[user_id] = (live_request_queue, 0)
+    print(f"ADK session started for user: {user_id} with audio={'enabled' if is_audio else 'disabled'}")
+    print(f"Active sessions after creation: {list(active_sessions.keys())}")
+
     return live_events, live_request_queue, True
 
 
 async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
-    """Starts an agent session for a given user."""
+    """Starts an agent session for a given user (legacy method for backward compatibility)."""
+    print(f"🚨 [SESSION DEBUG] start_agent_session called for user: {user_id}, is_audio: {is_audio}")
+    print(f"🚨 [SESSION DEBUG] Current active sessions: {list(active_sessions.keys())}")
+
     live_events, live_request_queue, is_new = await get_or_create_session(user_id, is_audio, force_new=True)
 
+    print(f"🚨 [SESSION DEBUG] Session creation result - is_new: {is_new}")
+
+    # Only send initial prompt if this is truly a new conversation
     message_count = active_sessions.get(user_id, (None, 0))[1]
     should_send_initial = is_new and message_count == 0
 
+    print(f"🚨 [SESSION DEBUG] Should send initial prompt: {should_send_initial} (is_new: {is_new}, message_count: {message_count})")
+
     if should_send_initial:
+        # Send an initial prompt to the agent to start the conversation
         initial_prompt = "Hello! Please introduce yourself and start the interview."
         if is_audio:
             initial_prompt += " The user will be speaking to you via voice."
 
         initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
         live_request_queue.send_content(content=initial_content)
+        print(f"🚨 [SESSION DEBUG] INITIAL PROMPT SENT TO AGENT - this will cause 'Hi there!' message")
+    else:
+        print(f"🚨 [SESSION DEBUG] No initial prompt sent - conversation already started")
 
     return live_events, live_request_queue
 
 
-async def generate_node_response(prompt: str, agent_type: str = "interviewer_agent") -> str:
-    """
-    Generates a single response for node creation without maintaining session history.
-    Returns the generated text response.
-    """
-    live_events, live_request_queue = await create_one_time_session(prompt, agent_type)
+async def generate_node_response(prompt: str, agent_name: str = "interviewer_agent") -> str:
+    """Runs a one-time prompt against a specified agent without maintaining chat history."""
+    agent_to_use = AGENT_MAP.get(agent_name)
+    if not agent_to_use:
+        raise ValueError(f"Agent '{agent_name}' not found.")
 
-    response_text = ""
-
-    try:
-        async for event in live_events:
-            # Extract text from the event
-            part = event.content and event.content.parts and event.content.parts[0]
-            if part and part.text and not event.partial:
-                response_text += part.text
-
-            # If the turn is complete, break
-            if event.turn_complete:
-                break
-
-    except Exception as e:
-        print(f"Error in node generation: {e}")
-        raise
-    finally:
-        # Clean up the session
-        live_request_queue.close()
-
-    return response_text.strip()
+    runner = InMemoryRunner(app_name=APP_NAME, agent=agent_to_use)
+    response = await runner.run_one_shot(prompt=prompt)
+    return response.output
 
 
 async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int, user_id: str, highlight_path: List[str] = None, all_links: List[dict] = None) -> List[dict]:
@@ -259,10 +288,12 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
         events_config.append({"time_months": event_time, "positivity": event_positivity})
 
     try:
+        # Build context from prior nodes
         context_parts = []
         if prior_nodes:
             context_parts.append("Life story so far:")
             for i, node in enumerate(prior_nodes):
+                # Handle both Pydantic models and dict objects
                 if hasattr(node, "name"):
                     node_name = node.name
                     node_desc = node.description
@@ -270,20 +301,27 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
                     node_name = node.get("name", node.get("id", f"Node {i + 1}"))
                     node_desc = node.get("description", f"Life event: {node_name}")
                 context_parts.append(f"{i + 1}. {node_name}: {node_desc}")
+
+        # Build the prompt
         context_str = "\n".join(context_parts) if context_parts else "Starting a new life journey."
 
-        # Build prompt details
         positivity_guidance = ""
         if positivity >= 0:
             if positivity <= 30:
-                positivity_guidance = "All events should be challenging."
+                positivity_guidance = "All events should be challenging or difficult."
             elif positivity <= 70:
                 positivity_guidance = "All events should be neutral or mixed."
             else:
-                positivity_guidance = "All events should be positive."
+                positivity_guidance = "All events should be positive and favorable."
         else:
-            positivity_guidance = "Mix positive, neutral, and challenging events."
-        time_guidance = f"All events should occur around {time_in_months} months from now." if time_in_months > 0 else "Events can occur at different timeframes (1-24 months)."
+            positivity_guidance = "Mix positive, neutral, and challenging events for variety."
+
+        time_guidance = ""
+        if time_in_months > 0:
+            time_guidance = f"All events should occur around {time_in_months} months from now."
+        else:
+            time_guidance = "Events can occur at different timeframes (1-24 months) for variety."
+
         node_type_guidance = f"The events should be related to: {node_type}" if node_type else ""
 
         # Add aging and life stage context
@@ -315,15 +353,15 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
         # Use the node_maker agent through ADK
         response_text = await generate_node_response(adk_prompt, "node_maker_agent")
 
+        # Try to parse JSON from the response
         try:
-            print(f"[ADK] Raw response from node_maker_agent: {response_text}")
+            # Extract JSON array from the response text
             start_idx = response_text.find("[")
             end_idx = response_text.rfind("]") + 1
             if start_idx >= 0 and end_idx > start_idx:
                 json_str = response_text[start_idx:end_idx]
-                print(f"[ADK] Extracted JSON: {json_str}")
                 events = json.loads(json_str)
-                print(f"[ADK] Parsed {len(events)} events from AI response")
+                # Ensure we have the right number of events and generate images
                 if len(events) >= num_nodes:
                     selected_events = events[:num_nodes]
                     # Generate images for all events in parallel
@@ -337,12 +375,15 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
                             event_name=event["name"],
                             event_description=event["description"],
                             cumulative_months=cumulative_months,
+                            positivity_score=event.get("positivity_score", 0.5),
                         )
                         image_tasks.append(task)
 
                     # Execute all image generation tasks in parallel
                     print(f"[IMAGE GEN] Running {len(image_tasks)} image generation tasks in parallel...")
                     image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
+
+                    # Process results and assign to events
                     for i, (event, result) in enumerate(zip(selected_events, image_results)):
                         if isinstance(result, Exception):
                             print(f"Failed to generate image for {event['name']}: {result}")
@@ -357,20 +398,45 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
                     print(f"[IMAGE GEN] Parallel image generation completed for {len(selected_events)} events")
                     return selected_events
                 else:
-                    print(f"[ADK] Not enough events generated: got {len(events)}, need {num_nodes}")
+                    # Pad with fallback events if not enough generated
+                    while len(events) < num_nodes:
+                        event_idx = len(events)
+                        events.append(
+                            {
+                                "name": f"Event {event_idx + 1}",
+                                "title": f"Generated Life Event {event_idx + 1}",
+                                "description": f"A life event that occurs {events_config[event_idx]['time_months']} months from now.",
+                                "type": "generated",
+                                "time_months": events_config[event_idx]["time_months"],
+                                "positivity_score": events_config[event_idx]["positivity"],
+                            }
+                        )
+                    return events
             else:
-                print(f"[ADK] No JSON array found in response")
+                raise ValueError("No JSON array found in response")
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[ADK] JSON parsing failed: {e}")
-            print(f"[ADK] Failed response: {response_text}")
+            print(f"Failed to parse ADK response as JSON: {e}")
+            print(f"ADK Response: {response_text}")
+            # Fallback to generating multiple basic events
+            return [
+                {
+                    "name": f"ADK Event {i + 1}",
+                    "title": f"ADK Generated Event {i + 1}",
+                    "description": f"Part of ADK response: {response_text[i * 50 : (i + 1) * 50]}..." if i * 50 < len(response_text) else f"Generated event {i + 1}",
+                    "type": "adk-generated",
+                    "time_months": events_config[i]["time_months"],
+                    "positivity_score": events_config[i]["positivity"],
+                }
+                for i in range(num_nodes)
+            ]
+
     except Exception as e:
-        print(f"[ADK] Generation error: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-    # Fallback
-    return [{"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": "A significant life event.", "type": "fallback", "time_months": events_config[i]["time_months"], "positivity_score": events_config[i]["positivity"]} for i in range(num_nodes)]
+        print(f"ADK generation error: {e}")
+        # Fallback to basic generation
+        return [
+            {"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": f"A significant life event occurring {events_config[i]['time_months']} months from the current situation.", "type": "fallback", "time_months": events_config[i]["time_months"], "positivity_score": events_config[i]["positivity"]}
+            for i in range(num_nodes)
+        ]
 
 
 def calculate_cumulative_time(highlight_path: List[str], all_links: List[dict]) -> int:
@@ -423,18 +489,18 @@ def get_mortality_context(total_months: int) -> str:
 
 
 def get_permanent_image_url(bucket_name: str, object_name: str) -> str:
-    """Generate a permanent signed URL for MinIO object."""
+    """Generate a permanent signed URL for MinIO object (7 days expiry)."""
     try:
         # Generate a presigned URL that expires in 7 days
         url = minio_client.presigned_get_object(bucket_name=bucket_name, object_name=object_name, expires=timedelta(days=7))
-        print(f"[MINIO] Generated signed URL for {bucket_name}/{object_name}")
+        print(f"🔗 [MINIO] Generated signed URL for {bucket_name}/{object_name}")
         return url
     except S3Error as e:
         print(f"[MINIO] Error generating signed URL: {e}")
         return ""
 
 
-async def generate_event_image(user_id: str, event_name: str, event_description: str, cumulative_months: int = 0) -> tuple[str, str]:
+async def generate_event_image(user_id: str, event_name: str, event_description: str, cumulative_months: int = 0, positivity_score: float = 0.5) -> tuple[str, str]:
     """Generate an image for a life event using user's base image as context with Nano Banana."""
     print(f"[IMAGE GEN] Starting image generation for event: {event_name}, user: {user_id}")
     try:
@@ -466,7 +532,29 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
         aging_guidance = get_aging_context(cumulative_months)
         years_elapsed = cumulative_months / 12
 
-        # Create image prompt based on event with aging context only
+        # Determine mood and style based on positivity score
+        if positivity_score >= 0.8:
+            mood_guidance = "joyful, celebratory mood with bright, warm colors and happy expressions"
+            lighting = "bright, golden hour lighting"
+            emotional_context = "Show happiness, achievement, and celebration"
+        elif positivity_score >= 0.6:
+            mood_guidance = "positive, hopeful mood with pleasant colors and smiles"
+            lighting = "warm, natural lighting"
+            emotional_context = "Show contentment and optimism"
+        elif positivity_score >= 0.4:
+            mood_guidance = "neutral, realistic mood with natural colors and calm expressions"
+            lighting = "balanced, natural lighting"
+            emotional_context = "Show normal life circumstances"
+        elif positivity_score >= 0.2:
+            mood_guidance = "concerned, stressful mood with muted colors and worried expressions"
+            lighting = "dim or overcast lighting with cooler tones"
+            emotional_context = "Show worry, stress, and difficulty"
+        else:
+            mood_guidance = "serious, challenging mood with darker colors and expressions of concern or sadness"
+            lighting = "subdued lighting with cooler, muted tones"
+            emotional_context = "Show the difficulty and emotional weight of challenging life circumstances"
+
+        # Create image prompt based on event with aging and positivity context
         image_prompt = f"""
         Create a realistic, professional SQUARE image representing this life event: {event_name}
         
@@ -475,13 +563,19 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
         AGING CONTEXT ({years_elapsed:.1f} years have passed):
         {aging_guidance}
         
+        EMOTIONAL TONE (Positivity: {positivity_score:.1f}/1.0):
+        {mood_guidance}
+        
+        VISUAL DIRECTION: {emotional_context}
+        
         Style Requirements:
-        - Photorealistic style with natural lighting
+        - Photorealistic style with {lighting}
         - Square aspect ratio (1:1)
         - Show appropriate facial expressions and body language for this life event
+        - Use colors and lighting that match the emotional context
         - Include relevant environmental elements (medical office, workplace, home, etc.)
         
-        Please create an image that authentically represents this life milestone.
+        Please create an image that authentically represents this life milestone with appropriate emotional tone.
         The image should be suitable for a professional life journey visualization.
         """
 
@@ -614,83 +708,96 @@ async def summarize_path_history(history: list[str]) -> str:
     return summary
 
 
-async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str, None]:
+async def agent_to_client_sse(live_events: AsyncGenerator):
     """Yields Server-Sent Events from the agent's live events."""
-    completion_trigger = "[COMPLETION_SUGGESTED]"
     async for event in live_events:
+        # If the turn is complete or interrupted, send a status update
         if event.turn_complete or event.interrupted:
-            message = {"turn_complete": event.turn_complete, "interrupted": event.interrupted}
+            message = {
+                "turn_complete": event.turn_complete,
+                "interrupted": event.interrupted,
+            }
             yield f"data: {json.dumps(message)}\n\n"
+            print(f"[AGENT TO CLIENT]: {message}")
             continue
 
+        # Extract the first part of the content
         part: Part = event.content and event.content.parts and event.content.parts[0]
         if not part:
             continue
 
+        # Handle audio data
         is_audio = part.inline_data and part.inline_data.mime_type.startswith("audio/pcm")
         if is_audio:
             audio_data = part.inline_data.data if part.inline_data else None
             if audio_data:
-                sample_count = len(audio_data) // 2
+                # Debug audio data
+                print(f"[AUDIO DEBUG] Raw audio data: {len(audio_data)} bytes")
+
+                # According to ADK docs, Gemini Live API outputs 24kHz 16-bit PCM
+                sample_count = len(audio_data) // 2  # 16-bit = 2 bytes per sample
+                duration_ms = (sample_count / 24000) * 1000  # 24kHz sample rate
+                print(f"[AUDIO DEBUG] Samples: {sample_count}, Duration: {duration_ms:.1f}ms @ 24kHz")
+
                 message = {
                     "mime_type": "audio/pcm",
                     "data": base64.b64encode(audio_data).decode("ascii"),
-                    "sample_rate": 24000,
+                    "sample_rate": 24000,  # Add sample rate info
+                    "sample_count": sample_count,
+                    "duration_ms": round(duration_ms, 1),
                 }
                 yield f"data: {json.dumps(message)}\n\n"
+                print(f"[AGENT TO CLIENT]: audio/pcm: {len(audio_data)} bytes, {sample_count} samples @ 24kHz")
                 continue
 
-        if part.text:
-            cleaned_text = part.text
-            completeness_suggested = False
+        # Handle partial text data
+        if part.text and event.partial:
+            message = {"mime_type": "text/plain", "data": part.text}
+            yield f"data: {json.dumps(message)}\n\n"
+            print(f"[AGENT TO CLIENT]: text/plain: {message}")
 
-            if completion_trigger in cleaned_text:
-                cleaned_text = cleaned_text.replace(completion_trigger, "").strip()
-                completeness_suggested = True
 
-            if cleaned_text:
-                message = {"mime_type": "text/plain", "data": cleaned_text}
-                yield f"data: {json.dumps(message)}\n\n"
+async def generate_node_response(prompt: str, agent_type: str = "interviewer_agent") -> str:
+    """
+    Generates a single response for node creation without maintaining session history.
+    Returns the generated text response.
+    """
+    live_events, live_request_queue = await create_one_time_session(prompt, agent_type)
 
-            if completeness_suggested:
-                yield f"data: {json.dumps({'completeness_suggested': True})}\n\n"
+    response_text = ""
 
-        function_calls = event.get_function_calls() if hasattr(event, "get_function_calls") else []
-        if function_calls:
-            for call in function_calls:
-                if call.name == "check_interview_completeness":
-                    args = call.args
+    try:
+        async for event in live_events:
+            # Extract text from the event
+            part = event.content and event.content.parts and event.content.parts[0]
+            if part and part.text and not event.partial:
+                response_text += part.text
 
-                    summary_text = (
-                        f"A {args.get('user_title', 'person')} based in {args.get('user_location', 'an unknown location')}. "
-                        f"Background: {args.get('background_info', 'Not provided')}. "
-                        f"Aspirations: {args.get('aspirations_info', 'Not provided')}. "
-                        f"Values: {args.get('values_info', 'Not provided')}. "
-                        f"Challenges: {args.get('challenges_info', 'Not provided')}."
-                    ).strip()
+            # If the turn is complete, break
+            if event.turn_complete:
+                break
 
-                    personal_info_data = {
-                        "summary": summary_text,
-                        "background": args.get("background_info", ""),
-                        "aspirations": args.get("aspirations_info", ""),
-                        "values": args.get("values_info", ""),
-                        "challenges": args.get("challenges_info", ""),
-                        "bio": summary_text,
-                        "goal": args.get("aspirations_info", ""),
-                        "location": args.get("user_location", ""),
-                        "interests": args.get("user_skills", ""),
-                        "skills": args.get("user_skills", ""),
-                        "title": args.get("user_title", ""),
-                    }
+    except Exception as e:
+        print(f"Error in node generation: {e}")
+        raise
+    finally:
+        # Clean up the session
+        live_request_queue.close()
 
-                    yield f"data: {json.dumps({'interview_complete': True, 'personal_info_data': personal_info_data})}\n\n"
+    return response_text.strip()
 
 
 def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, Any]:
-    """Sends a message from the client to the agent."""
+    """
+    Sends a message from the client to the agent.
+    Returns info about the session including message count.
+    """
+    print(f"[SEND MESSAGE] User: {user_id}, Type: {mime_type}, Active sessions: {list(active_sessions.keys())}")
+
     session_data = active_sessions.get(user_id)
     if not session_data:
-        raise ValueError(f"Session not found for user {user_id}.")
+        print(f"[ERROR] Session not found for user {user_id}. Active sessions: {list(active_sessions.keys())}")
+        raise ValueError(f"Session not found for user {user_id}. Please refresh and try again.")
 
     live_request_queue, message_count = session_data
 
@@ -698,16 +805,31 @@ def send_message_to_agent(user_id: str, mime_type: str, data: str) -> Dict[str, 
         content = Content(role="user", parts=[Part.from_text(text=data)])
         live_request_queue.send_content(content=content)
         message_count += 1
+        print(f"[CLIENT TO AGENT]: {data}")
     elif mime_type == "audio/pcm":
         decoded_data = base64.b64decode(data)
+
+        # Debug input audio
+        sample_count = len(decoded_data) // 2  # 16-bit = 2 bytes per sample
+        duration_ms = (sample_count / 16000) * 1000  # Input is 16kHz
+        print(f"[AUDIO DEBUG] Input audio: {len(decoded_data)} bytes, {sample_count} samples @ 16kHz, {duration_ms:.1f}ms")
+
+        # Validate minimum audio duration to prevent agent confusion
+        MIN_DURATION_MS = 800  # Minimum 800ms to match frontend validation
+        if duration_ms < MIN_DURATION_MS:
+            print(f"[AUDIO WARNING] Audio too short ({duration_ms:.1f}ms < {MIN_DURATION_MS}ms) - cut-off speech like 'hel-' may confuse agent")
+            # Still send it, but log the warning
+
         live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
         message_count += 1
+        print(f"[CLIENT TO AGENT]: audio/pcm: {len(decoded_data)} bytes")
     else:
         raise ValueError(f"Mime type not supported: {mime_type}")
 
+    # Update the session with new message count
     active_sessions[user_id] = (live_request_queue, message_count)
 
     return {
         "message_count": message_count,
-        "should_check_completeness": message_count >= 8 and message_count % 2 == 0,
+        "should_check_completeness": message_count >= 8 and message_count % 2 == 0,  # Check every 2 messages after 8
     }

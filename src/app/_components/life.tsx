@@ -60,6 +60,7 @@ interface LifeProps {
   handleNodeDelete: (nodeId: string) => void;
   handleNodeViewClick: (nodeId: string) => void;
   fgRef: RefObject<any>;
+  getDisplayName: (node: Node) => string;
 }
 
 export default function Life({
@@ -71,6 +72,7 @@ export default function Life({
   handleNodeDelete,
   handleNodeViewClick,
   fgRef,
+  getDisplayName,
 }: LifeProps) {
   const [isMounted, setIsMounted] = useState(false);
   const highlightRef = useRef<string[]>([]);
@@ -96,15 +98,16 @@ export default function Life({
 
     console.log("LINKS: ", map);
     nodes.forEach((node: Node) => {
-      if (node.id == "Now") {
-        colors[node.id] = "red";
+      if (node.id == "Now" || node.id.startsWith("Now-")) {
+        colors[node.id] = "yellow"; // "Now" node is yellow
         return;
       }
       if (node.type === "loading") {
         colors[node.id] = "#6b7280"; // Gray for loading nodes
         return;
       }
-      if (map.has(node.id)) colors[node.id] = "yellow";
+      // Non-leaf nodes (have outgoing links) are red, leaf nodes (no outgoing links) are green
+      if (map.has(node.id)) colors[node.id] = "red";
       else colors[node.id] = "green";
     });
     console.log("Calculated node colors:", colors);
@@ -175,7 +178,8 @@ export default function Life({
             const color = nodeColors[node.id] || "green";
 
             // === Base size from nodeVal logic ===
-            const radius = node.id === "Now" ? 10 : 4;
+            const radius =
+              node.id === "Now" || node.id.startsWith("Now-") ? 10 : 4;
 
             // === Node body ===
             const geometry = new THREE.SphereGeometry(radius, 32, 32);
@@ -227,7 +231,7 @@ export default function Life({
             }
 
             // === Label ===
-            const sprite = new SpriteText(node.id);
+            const sprite = new SpriteText(getDisplayName(node));
             sprite.color = "white";
             sprite.textHeight = radius * 1.5;
             sprite.center.set(0.5, 0);
@@ -236,13 +240,15 @@ export default function Life({
 
             return group;
           }}
-          nodeVal={(node) => (node.id === "Now" ? 50 : 4)}
+          nodeVal={(node) =>
+            node.id === "Now" || node.id.startsWith("Now-") ? 50 : 4
+          }
           d3AlphaDecay={0.02}
           d3VelocityDecay={0.6}
           enableNodeDrag={true}
           onNodeDrag={(node) => {
             // Prevent dragging of "Now" node only
-            if (node.id === "Now") {
+            if (node.id === "Now" || node.id.startsWith("Now-")) {
               node.fx = 0;
               node.fy = 0;
               node.fz = 0;
@@ -279,7 +285,7 @@ export default function Life({
           }}
           onNodeDragEnd={(node) => {
             // Keep "Now" fixed, but allow other nodes to be positioned
-            if (node.id === "Now") {
+            if (node.id === "Now" || node.id.startsWith("Now-")) {
               node.fx = 0;
               node.fy = 0;
               node.fz = 0;
@@ -293,7 +299,9 @@ export default function Life({
           }}
           onEngineStop={() => {
             // Fix "Now" node at center after physics settle
-            const nowNode = nodes.find((node) => node.id === "Now");
+            const nowNode = nodes.find(
+              (node) => node.id === "Now" || node.id.startsWith("Now-"),
+            );
             if (nowNode) {
               nowNode.fx = 0;
               nowNode.fy = 0;
