@@ -16,6 +16,7 @@ class Node(BaseModel):
     description: str
     type: str
     image_name: str
+    image_url: Optional[str] = ""
     timeInMonths: int
     title: str
     created_at: datetime

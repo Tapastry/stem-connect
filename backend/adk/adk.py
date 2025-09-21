@@ -1,14 +1,23 @@
+import asyncio
 import base64
+import io
 import json
+import mimetypes
+import os
 import random
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, AsyncGenerator, Dict, List, Tuple
 
+import google.generativeai as genai
+from google import genai as google_genai
 from google.adk.agents import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from google.genai.types import AudioTranscriptionConfig, Blob, Content, Part, PrebuiltVoiceConfig, SpeechConfig, VoiceConfig
+from minio import Minio
+from minio.error import S3Error
 
 from .interviewer import agent as interviewer_agent
 from .node_maker import agent as node_maker_agent
@@ -17,6 +26,32 @@ from .reviewer import reviewer_agent
 active_sessions: Dict[str, Tuple[LiveRequestQueue, int]] = {}  # Now stores (queue, message_count)
 
 APP_NAME = "Stem-Connect ADK Integration"
+
+# Initialize MinIO client
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
+MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
+
+minio_client = Minio(
+    MINIO_ENDPOINT,
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=MINIO_SECURE,
+)
+
+# Initialize Gemini for image generation
+# Load environment variables
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+print(f"🔑 [IMAGE GEN] GEMINI_API_KEY loaded: {'Yes' if GEMINI_API_KEY else 'No'}")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    image_model = genai.GenerativeModel("gemini-2.5-flash")
+    print(f"✅ [IMAGE GEN] Gemini configured successfully")
 
 # Agent registry - map of agent names to agent instances
 AGENT_MAP = {
@@ -232,7 +267,7 @@ async def generate_node_response(prompt: str, agent_name: str = "interviewer_age
     return response.output
 
 
-async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int) -> List[dict]:
+async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int, user_id: str) -> List[dict]:
     """Generate life events using the node_maker agent through ADK."""
 
     # Handle random values for each event (define outside try block)
@@ -302,9 +337,40 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
             if start_idx >= 0 and end_idx > start_idx:
                 json_str = response_text[start_idx:end_idx]
                 events = json.loads(json_str)
-                # Ensure we have the right number of events
+                # Ensure we have the right number of events and generate images
                 if len(events) >= num_nodes:
-                    return events[:num_nodes]
+                    selected_events = events[:num_nodes]
+                    # Generate images for all events in parallel
+                    print(f"🖼️ Starting PARALLEL image generation for {len(selected_events)} events for user {user_id}")
+
+                    # Create parallel tasks for image generation
+                    image_tasks = []
+                    for event in selected_events:
+                        task = generate_event_image(
+                            user_id=user_id,
+                            event_name=event["name"],
+                            event_description=event["description"],
+                        )
+                        image_tasks.append(task)
+
+                    # Execute all image generation tasks in parallel
+                    print(f"⚡ [IMAGE GEN] Running {len(image_tasks)} image generation tasks in parallel...")
+                    image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
+
+                    # Process results and assign to events
+                    for i, (event, result) in enumerate(zip(selected_events, image_results)):
+                        if isinstance(result, Exception):
+                            print(f"❌ Failed to generate image for {event['name']}: {result}")
+                            event["image_name"] = ""
+                            event["image_url"] = ""
+                        else:
+                            image_filename, signed_url = result
+                            event["image_name"] = image_filename
+                            event["image_url"] = signed_url
+                            print(f"✅ Image generated for {event['name']}: {image_filename}")
+
+                    print(f"🎉 [IMAGE GEN] Parallel image generation completed for {len(selected_events)} events")
+                    return selected_events
                 else:
                     # Pad with fallback events if not enough generated
                     while len(events) < num_nodes:
@@ -345,6 +411,179 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
             {"name": f"Event {i + 1}", "title": f"Life Event {i + 1}", "description": f"A significant life event occurring {events_config[i]['time_months']} months from the current situation.", "type": "fallback", "time_months": events_config[i]["time_months"], "positivity_score": events_config[i]["positivity"]}
             for i in range(num_nodes)
         ]
+
+
+def get_permanent_image_url(bucket_name: str, object_name: str) -> str:
+    """Generate a permanent signed URL for MinIO object (7 days expiry)."""
+    try:
+        # Generate a presigned URL that expires in 7 days
+        url = minio_client.presigned_get_object(bucket_name=bucket_name, object_name=object_name, expires=timedelta(days=7))
+        print(f"🔗 [MINIO] Generated signed URL for {bucket_name}/{object_name}")
+        return url
+    except S3Error as e:
+        print(f"❌ [MINIO] Error generating signed URL: {e}")
+        return ""
+
+
+async def generate_event_image(user_id: str, event_name: str, event_description: str) -> tuple[str, str]:
+    """Generate an image for a life event using user's base image as context with Nano Banana."""
+    print(f"🖼️ [IMAGE GEN] Starting image generation for event: {event_name}, user: {user_id}")
+    try:
+        # Ensure buckets exist
+        user_bucket = "user-images"
+        node_bucket = "node-images"
+
+        for bucket in [user_bucket, node_bucket]:
+            try:
+                if not minio_client.bucket_exists(bucket):
+                    minio_client.make_bucket(bucket)
+            except S3Error as e:
+                print(f"Error checking/creating bucket {bucket}: {e}")
+
+        # Get user's base image from MinIO
+        user_image_name = f"{user_id}.png"
+        user_image_data = None
+
+        print(f"🔍 [IMAGE GEN] Looking for base image: {user_bucket}/{user_image_name}")
+        try:
+            response = minio_client.get_object(user_bucket, user_image_name)
+            user_image_data = response.read()
+            print(f"✅ [IMAGE GEN] Retrieved base image for user {user_id}: {len(user_image_data)} bytes")
+        except S3Error as e:
+            print(f"❌ [IMAGE GEN] No base image found for user {user_id}: {e}")
+            print(f"🔄 [IMAGE GEN] Will generate image without base image context")
+
+        # Create image prompt based on event
+        image_prompt = f"""
+        Using this person's image as reference, create a realistic, professional SQUARE image representing this life event: {event_name}
+        
+        Context: {event_description}
+        
+        Style: Photorealistic, warm lighting, inspiring and hopeful mood
+        Focus: Show this person experiencing or achieving this life milestone
+        Composition: Square aspect ratio (1:1), clean, modern, with good depth of field
+        Include: Elements that represent the specific life event while maintaining the person's appearance
+        
+        Make it suitable for a professional life journey visualization. The image must be square format.
+        """
+
+        if GEMINI_API_KEY:
+            print(f"🤖 [IMAGE GEN] GEMINI_API_KEY found, proceeding with image generation")
+
+            # Initialize Google GenAI client for image generation
+            client = google_genai.Client(api_key=GEMINI_API_KEY)
+
+            model = "gemini-2.5-flash-image-preview"
+            print(f"📱 [IMAGE GEN] Using model: {model}")
+
+            # Create content with user image as context + text prompt (if base image exists)
+            parts = []
+            if user_image_data:
+                print(f"🖼️ [IMAGE GEN] Adding user base image as context")
+                parts.append(
+                    types.Part.from_bytes(
+                        mime_type="image/png",
+                        data=user_image_data,
+                    )
+                )
+            else:
+                print(f"⚠️ [IMAGE GEN] No base image, generating without user context")
+
+            parts.append(types.Part.from_text(text=image_prompt))
+
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=parts,
+                ),
+            ]
+
+            print(f"📝 [IMAGE GEN] Prompt: {image_prompt[:100]}...")
+            generate_content_config = types.GenerateContentConfig(
+                response_modalities=[
+                    "IMAGE",
+                    "TEXT",
+                ],
+            )
+
+            print(f"🚀 [IMAGE GEN] Starting Nano Banana generation for {event_name}...")
+
+            # Generate image using Nano Banana (run in executor for true async)
+            def _generate_image_sync():
+                chunk_count = 0
+                for chunk in client.models.generate_content_stream(
+                    model=model,
+                    contents=contents,
+                    config=generate_content_config,
+                ):
+                    chunk_count += 1
+                    print(f"📦 [IMAGE GEN] Received chunk {chunk_count}")
+
+                    if chunk.candidates is None or chunk.candidates[0].content is None or chunk.candidates[0].content.parts is None:
+                        print(f"⚠️ [IMAGE GEN] Chunk {chunk_count} has no content, skipping")
+                        continue
+
+                    # Check for image data
+                    part = chunk.candidates[0].content.parts[0]
+                    if part.inline_data and part.inline_data.data:
+                        print(f"🎉 [IMAGE GEN] Found image data in chunk {chunk_count}!")
+                        return part.inline_data
+                    else:
+                        # Handle text response (if any)
+                        if hasattr(chunk, "text") and chunk.text:
+                            print(f"💬 [IMAGE GEN] Text response: {chunk.text}")
+                        else:
+                            print(f"🔍 [IMAGE GEN] Chunk {chunk_count} has no image or text data")
+
+                print(f"❌ [IMAGE GEN] No image data received for {event_name} after {chunk_count} chunks")
+                return None
+
+            # Run the synchronous generation in a thread pool
+            import concurrent.futures
+
+            loop = asyncio.get_event_loop()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                inline_data = await loop.run_in_executor(executor, _generate_image_sync)
+
+            if inline_data:
+                data_buffer = inline_data.data
+                file_extension = mimetypes.guess_extension(inline_data.mime_type) or ".png"
+                print(f"📊 [IMAGE GEN] Image data: {len(data_buffer)} bytes, type: {inline_data.mime_type}")
+
+                # Create filename: {node-name}-{user-id}.png
+                safe_event_name = event_name.replace(" ", "-").replace("/", "-").lower()
+                image_filename = f"{safe_event_name}-{user_id}{file_extension}"
+                print(f"📁 [IMAGE GEN] Target filename: {image_filename}")
+
+                # Upload to MinIO
+                try:
+                    data_stream = io.BytesIO(data_buffer)
+                    minio_client.put_object(node_bucket, image_filename, data_stream, length=len(data_buffer), content_type=inline_data.mime_type)
+                    print(f"✅ [IMAGE GEN] Image uploaded to MinIO: {node_bucket}/{image_filename}")
+
+                    # Generate permanent signed URL
+                    signed_url = get_permanent_image_url(node_bucket, image_filename)
+                    return image_filename, signed_url
+                except S3Error as e:
+                    print(f"❌ [IMAGE GEN] Error uploading image to MinIO: {e}")
+                    return "", ""
+            else:
+                print(f"❌ [IMAGE GEN] No image data received from Nano Banana for {event_name}")
+                return "", ""
+        else:
+            if not GEMINI_API_KEY:
+                print("❌ [IMAGE GEN] No GEMINI_API_KEY found, skipping image generation")
+            else:
+                print("❌ [IMAGE GEN] No user image data and GEMINI_API_KEY found")
+            return "", ""
+
+    except Exception as e:
+        print(f"💥 [IMAGE GEN] Error generating image for event {event_name}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return "", ""
 
 
 async def summarize_path_history(history: list[str]) -> str:

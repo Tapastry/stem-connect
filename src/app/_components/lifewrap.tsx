@@ -1,5 +1,6 @@
 "use client";
 import type { User } from "next-auth";
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import ConfigPanel from "./configpanel";
 import Life from "./life";
@@ -19,6 +20,7 @@ interface Node {
   title?: string;
   type?: string;
   imageName?: string;
+  imageUrl?: string;
   timeInMonths?: number;
   description?: string;
   createdAt?: string;
@@ -132,6 +134,7 @@ const onNodeClick = async (
           description: backendNode.description,
           type: backendNode.type,
           imageName: backendNode.image_name,
+          imageUrl: backendNode.image_url,
           timeInMonths: backendNode.timeInMonths,
           createdAt: backendNode.created_at,
           userId: backendNode.user_id,
@@ -348,6 +351,10 @@ export default function LifeWrap({ user }: { user: User }) {
   const [links, setLinks] = useState<Link[]>([]);
   const [highlightedPath, setHighlightedPathState] = useState<string[]>([]);
   const [nodesToView, setNodesToView] = useState<Node[]>([]);
+  const [modalImage, setModalImage] = useState<{
+    url: string;
+    alt: string;
+  } | null>(null);
   const fgRef = useCallback((node: any) => {
     // Check if the node is being mounted
     if (node !== null) {
@@ -421,6 +428,7 @@ export default function LifeWrap({ user }: { user: User }) {
           title: dbNode.title,
           type: dbNode.type,
           imageName: dbNode.imageName,
+          imageUrl: dbNode.imageUrl,
           timeInMonths: dbNode.timeInMonths,
           description: dbNode.description,
           createdAt: dbNode.createdAt,
@@ -534,7 +542,28 @@ export default function LifeWrap({ user }: { user: User }) {
                           : "border-gray-700 bg-gray-800/50"
                       }`}
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-4">
+                        {/* Node Image */}
+                        {node.imageUrl && (
+                          <div className="flex-shrink-0">
+                            <Image
+                              src={node.imageUrl}
+                              alt={node.title || node.name || node.id}
+                              width={80}
+                              height={80}
+                              className="cursor-pointer rounded-lg object-cover transition-opacity hover:opacity-80"
+                              unoptimized={true}
+                              onClick={() =>
+                                setModalImage({
+                                  url: node.imageUrl!,
+                                  alt: node.title || node.name || node.id,
+                                })
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {/* Node Content */}
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <h3 className="font-semibold text-white">
@@ -637,6 +666,32 @@ export default function LifeWrap({ user }: { user: User }) {
           fgRef={fgRef}
         />
       </div>
+
+      {/* Image Modal */}
+      {modalImage && (
+        <div
+          className="bg-opacity-80 fixed inset-0 z-50 flex items-center justify-center bg-black"
+          onClick={() => setModalImage(null)}
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw]">
+            <Image
+              src={modalImage.url}
+              alt={modalImage.alt}
+              width={600}
+              height={600}
+              className="rounded-lg object-contain"
+              unoptimized={true}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setModalImage(null)}
+              className="bg-opacity-50 hover:bg-opacity-70 absolute top-4 right-4 rounded-full bg-black p-2 text-white transition-all"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

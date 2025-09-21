@@ -106,6 +106,7 @@ export const nodes = createTable("node", (d) => ({
   title: d.varchar({ length: 255 }),
   type: d.varchar({ length: 255 }).notNull(),
   imageName: d.varchar({ length: 255 }),
+  imageUrl: d.text(),
   timeInMonths: d.integer().default(1),
   description: d.text(),
   createdAt: d
