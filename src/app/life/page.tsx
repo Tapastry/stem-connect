@@ -53,8 +53,13 @@ export default async function LifePage() {
   }
 
   return (
-    <div className="h-screen w-screen">
-      <LifeWrap user={session.user} />
+    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-blue-900/20 to-indigo-900/20"></div>
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent"></div>
+
+      <div className="relative z-10 h-screen w-screen">
+        <LifeWrap user={session.user} />
+      </div>
     </div>
   );
 }

@@ -685,16 +685,16 @@ export default function LifeWrap({ user }: { user: User }) {
 
   return (
     <div className="flex h-screen w-screen">
-      <div className="flex h-full w-1/3 flex-col border border-gray-700 bg-gray-900 shadow-lg shadow-indigo-500/10">
+      <div className="flex h-full w-1/3 flex-col border-r border-white/10 bg-black/50 backdrop-blur-sm shadow-lg shadow-indigo-500/10">
         {/* Tab Navigation */}
-        <div className="flex w-full border-b border-gray-700 bg-gray-800 p-4">
+        <div className="flex w-full border-b border-white/10 bg-black/25 p-4">
           {types.map((type, idx) => (
             <button
               key={idx}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-150 ${
+              className={`flex-1 rounded-t-lg px-4 py-3 text-sm font-medium transition-all duration-150 ${
                 screen === type.type
-                  ? "border-b-2 border-indigo-500 bg-gray-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:text-gray-300"
+                  ? "border-b-2 border-blue-400 bg-white/5 text-white"
+                  : "bg-transparent text-gray-400 hover:bg-white/5 hover:text-gray-200"
               }`}
               onClick={() => setScreen(type.type)}
             >
@@ -727,8 +727,8 @@ export default function LifeWrap({ user }: { user: User }) {
                       key={node.id}
                       className={`rounded-lg border p-4 transition-all ${
                         index === 0
-                          ? "border-indigo-500 bg-indigo-900/20"
-                          : "border-gray-700 bg-gray-800/50"
+                          ? "border-blue-400 bg-blue-500/10"
+                          : "border-white/10 bg-white/5"
                       }`}
                     >
                       <div className="flex items-start gap-4">
@@ -759,7 +759,7 @@ export default function LifeWrap({ user }: { user: User }) {
                               {getDisplayName(node)}
                             </h3>
                             {index === 0 && (
-                              <span className="rounded-full bg-indigo-600 px-2 py-1 text-xs text-white">
+                              <span className="rounded-full bg-blue-600 px-2 py-1 text-xs text-white">
                                 Selected
                               </span>
                             )}
@@ -788,7 +788,7 @@ export default function LifeWrap({ user }: { user: User }) {
                   ))}
                 </div>
               ) : (
-                <div className="flex flex-1 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 p-8">
+                <div className="flex flex-1 items-center justify-center rounded-lg border border-white/10 bg-white/5 p-8">
                   <div className="text-center">
                     <div className="mb-4 text-4xl text-gray-600">👆</div>
                     <h3 className="mb-2 text-lg font-medium text-gray-300">
@@ -803,7 +803,7 @@ export default function LifeWrap({ user }: { user: User }) {
               )}
 
               {/* Prompt Input at Bottom */}
-              <div className="flex flex-col gap-2 rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+              <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
                 <label
                   htmlFor="node-prompt"
                   className="text-sm font-medium text-gray-300"
@@ -821,7 +821,7 @@ export default function LifeWrap({ user }: { user: User }) {
                       prompt: e.target.value,
                     }))
                   }
-                  className="w-full rounded-md border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition duration-150 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                  className="w-full rounded-md border-white/20 bg-white/5 px-3 py-2 text-sm text-white transition duration-150 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -846,7 +846,7 @@ export default function LifeWrap({ user }: { user: User }) {
               setLinks,
               setScreen,
               isGenerating,
-              setIsGenerating,
+              setIsGenerating
             );
           }}
           handleNodeDelete={(nodeId: string) => {
@@ -857,7 +857,7 @@ export default function LifeWrap({ user }: { user: User }) {
               setNodes,
               setLinks,
               setNodesToView,
-              setScreen,
+              setScreen
             );
           }}
           handleNodeViewClick={(nodeId: string) => {
@@ -866,7 +866,7 @@ export default function LifeWrap({ user }: { user: User }) {
               highlightedPath,
               nodes,
               setNodesToView,
-              setScreen,
+              setScreen
             );
           }}
           fgRef={fgRef}
@@ -903,7 +903,7 @@ export default function LifeWrap({ user }: { user: User }) {
       {/* User Image Upload Dialog */}
       {showUploadDialog && (
         <div className="bg-opacity-80 fixed inset-0 z-50 flex items-center justify-center bg-black">
-          <div className="mx-4 w-full max-w-md rounded-lg border border-gray-700 bg-gray-900 p-6">
+          <div className="mx-4 w-full max-w-md rounded-lg border border-white/10 bg-zinc-900 p-6">
             <h2 className="mb-4 text-xl font-bold text-white">
               Upload Your Photo
             </h2>
@@ -921,7 +921,7 @@ export default function LifeWrap({ user }: { user: User }) {
                   setSelectedFile(file);
                 }
               }}
-              className="mb-4 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-white"
+              className="mb-4 w-full rounded border border-white/20 bg-zinc-800 px-3 py-2 text-white"
             />
 
             {selectedFile && (
@@ -937,7 +937,7 @@ export default function LifeWrap({ user }: { user: User }) {
                   setHasUserImage(false);
                   setSelectedFile(null);
                 }}
-                className="flex-1 rounded bg-gray-700 px-4 py-2 text-white transition-colors hover:bg-gray-600"
+                className="flex-1 rounded-lg bg-gray-600 px-4 py-2 text-white transition-colors hover:bg-gray-700"
               >
                 Skip for now
               </button>
@@ -969,7 +969,7 @@ export default function LifeWrap({ user }: { user: User }) {
                       {
                         method: "POST",
                         body: formData,
-                      },
+                      }
                     );
 
                     if (response.ok) {
@@ -982,7 +982,7 @@ export default function LifeWrap({ user }: { user: User }) {
                       console.error(
                         "Failed to upload image:",
                         response.status,
-                        errorData,
+                        errorData
                       );
                     }
                   } catch (error) {
@@ -992,7 +992,7 @@ export default function LifeWrap({ user }: { user: User }) {
                   }
                 }}
                 disabled={!selectedFile || isUploading}
-                className="flex-1 rounded bg-indigo-600 px-4 py-2 text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-500"
+                className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 px-4 py-2 text-white transition-all hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isUploading ? "Uploading..." : "Upload Image"}
               </button>
