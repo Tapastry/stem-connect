@@ -2,7 +2,7 @@
 Request/Response Pydantic models for API endpoints.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from pydantic import BaseModel
 
@@ -52,3 +52,14 @@ class NodeResponse(BaseModel):
     prompt: str
     output: str
     attached_node_ids: List[str]
+
+
+class UpdateNodeRequest(BaseModel):
+    label: Optional[str] = None
+    notes: Optional[str] = None
+    completed: Optional[bool] = None
+
+
+class InterviewCompletenessRequest(BaseModel):
+    user_id: str
+    conversation_history: List[Dict[str, str]]

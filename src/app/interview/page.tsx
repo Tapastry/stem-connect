@@ -168,6 +168,13 @@ export default function InterviewPage() {
         if (result.is_complete) {
           setInterviewComplete(true);
           console.log("✅ Interview complete!", result);
+        } else {
+          // Handle suggested follow-up questions
+          const questions = result.suggested_questions;
+          if (questions && questions.length > 0) {
+            console.log("📋 Reviewer suggested follow-up questions:", questions);
+            // The backend has already sent these to the interviewer agent
+          }
         }
       }
     } catch (error) {
@@ -241,7 +248,43 @@ export default function InterviewPage() {
       
       try {
         const data = JSON.parse(event.data);
-        console.log("📨 SSE Event:", data);
+        console.log("📨 SSE Event:", data); // Debugging all SSE events
+
+        // Handle agent's suggestion to check for completeness
+        if (data.completeness_suggested) {
+            console.log("💡 Agent suggested checking for interview completeness.");
+            checkInterviewCompleteness();
+            return;
+        }
+
+        // Handle interview completion via tool call
+        if (data.interview_complete) {
+            console.log("🎉 Interview completed via tool call!");
+            const personalInfoData = data.personal_info_data;
+            
+            if (personalInfoData) {
+                // Save the data to the database (non-blocking)
+                fetch("/api/interview/save-personal-info", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        user_id: session?.user?.id,
+                        personal_info: personalInfoData
+                    }),
+                }).then(response => {
+                    if (response.ok) {
+                        console.log("✅ Personal information saved successfully");
+                        setInterviewComplete(true);
+                        // The useEffect will handle the redirect
+                    } else {
+                        console.error("❌ Failed to save personal information");
+                    }
+                }).catch(error => {
+                    console.error("❌ Error saving personal information:", error);
+                });
+            }
+            return;
+        }
         
         // Handle turn complete
         if (data.turn_complete) {
@@ -466,18 +509,20 @@ export default function InterviewPage() {
     // Clear any existing agent message being typed
     setCurrentAgentMessage("");
 
-    // Add user transcription to chat if available
+    // Add user transcription to chat IMMEDIATELY if available
     if (transcription) {
-      setMessages(prev => [...prev, {
-        role: "user",
+      const userMessage = {
+        role: "user" as const,
         content: transcription,
         timestamp: new Date(),
         id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      }]);
+      };
+      
+      console.log(`✅ Adding user voice message: "${transcription}"`);
+      setMessages(prev => [...prev, userMessage]);
     }
 
     // User is now speaking, agent should wait
-    console.log("🎤 USER SENT AUDIO - switching to agent's turn");
     setAgentTurn(true);
     setWaitingForUserResponse(false);
     console.log("🎤 Sending audio data:", mimeType, audioData.length);
