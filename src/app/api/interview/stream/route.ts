@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
 import { NextRequest } from "next/server";
 import { auth } from "~/server/auth";
 

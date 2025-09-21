@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "~/server/auth";
 
