@@ -315,6 +315,22 @@ export default function Life({
               fgRef.current.d3Force("center", null);
             }
           }}
+          onNodeClick={(node, event) => {
+            // Handle keyboard modifiers
+            if (event.shiftKey) {
+              // Shift + Click = Create new nodes
+              console.log("Shift+Click: Creating new nodes from", node.id);
+              handleNodeClick(node.id);
+            } else if (event.ctrlKey || event.metaKey) {
+              // Ctrl/Cmd + Click = Delete node
+              console.log("Ctrl+Click: Deleting node", node.id);
+              handleNodeDelete(node.id);
+            } else {
+              // Normal Click = View node
+              console.log("Normal Click: Viewing node", node.id);
+              handleNodeViewClick(node.id);
+            }
+          }}
         />
       )}
     </div>

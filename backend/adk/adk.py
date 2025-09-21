@@ -199,7 +199,7 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
     
     live_events, live_request_queue, is_new = await get_or_create_session(user_id, False, force_new=False)
     
-    # Send initial prompt only if we haven't sent it to this user before
+    # Always send initial prompt for new sessions to trigger the agent
     if should_send_initial:
         initial_prompt = "Hello! Please introduce yourself and start the interview. The user will be typing their responses, and your responses will be read aloud to them. Please start by asking for their name and preferred pronouns."
         print(f"🚀 [ADK] Sending initial prompt for new TEXT-ONLY interview session for user {user_id}")
@@ -215,7 +215,11 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
             queue, msg_count, _ = active_sessions[user_id]
             active_sessions[user_id] = (queue, msg_count, True)
     else:
-        print(f"🔄 [ADK] Initial message already sent to user {user_id}, skipping")
+        # Even if initial message was sent, we need to trigger agent response for new SSE connections
+        print(f"🔄 [ADK] Initial message already sent to user {user_id}, but sending greeting trigger for SSE connection")
+        greeting_trigger = "Please greet the user and ask for their name and preferred pronouns to start the interview."
+        trigger_content = Content(role="user", parts=[Part.from_text(text=greeting_trigger)])
+        live_request_queue.send_content(content=trigger_content)
 
     return live_events, live_request_queue
 
@@ -629,7 +633,9 @@ async def summarize_path_history(history: list[str]) -> str:
 async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str, None]:
     """Yields Server-Sent Events from the agent's live events."""
     completion_trigger = "[COMPLETION_SUGGESTED]"
+    print(f"[SSE DEBUG] Starting SSE stream processing")
     async for event in live_events:
+        print(f"[SSE DEBUG] Processing event: turn_complete={getattr(event, 'turn_complete', None)}, interrupted={getattr(event, 'interrupted', None)}, has_content={bool(event.content)}")
         if event.turn_complete or event.interrupted:
             message = {"turn_complete": event.turn_complete, "interrupted": event.interrupted}
             yield f"data: {json.dumps(message)}\n\n"
@@ -655,6 +661,7 @@ async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str
         if part.text:
             cleaned_text = part.text
             completeness_suggested = False
+            print(f"[SSE DEBUG] Found text: '{cleaned_text[:50]}...' (length: {len(cleaned_text)})")
 
             if completion_trigger in cleaned_text:
                 cleaned_text = cleaned_text.replace(completion_trigger, "").strip()
@@ -663,9 +670,11 @@ async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str
             if cleaned_text:
                 message = {"mime_type": "text/plain", "data": cleaned_text}
                 yield f"data: {json.dumps(message)}\n\n"
+                print(f"[AGENT TO CLIENT]: text/plain: {message}")
 
             if completeness_suggested:
                 yield f"data: {json.dumps({'completeness_suggested': True})}\n\n"
+                print(f"[AGENT TO CLIENT]: completeness_suggested")
 
         function_calls = event.get_function_calls() if hasattr(event, "get_function_calls") else []
         if function_calls:

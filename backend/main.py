@@ -268,6 +268,35 @@ async def check_interview_completeness_endpoint(request: InterviewCompletenessRe
     return result
 
 
+@app.get("/api/get-personal-info/{user_id}")
+async def get_personal_info_endpoint(user_id: str):
+    """
+    Endpoint to get personal information for a user.
+    """
+    try:
+        with db.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT * FROM "stem-connect_personal_information"
+                WHERE "userId" = %s
+                """,
+                (user_id,),
+            )
+            personal_info = cursor.fetchone()
+            
+            if not personal_info:
+                raise HTTPException(status_code=404, detail="Personal information not found")
+            
+            return dict(personal_info)
+            
+    except Exception as e:
+        if "Personal information not found" in str(e):
+            raise e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get personal information: {e}"
+        )
+
+
 @app.post("/api/save-personal-info")
 async def save_personal_info_endpoint(request: dict):
     """
