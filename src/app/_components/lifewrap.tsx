@@ -491,7 +491,6 @@ export default function LifeWrap({ user }: { user: User }) {
     alt: string;
   } | null>(null);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [showControls, setShowControls] = useState(false);
   const [hasUserImage, setHasUserImage] = useState<boolean | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -995,61 +994,6 @@ export default function LifeWrap({ user }: { user: User }) {
           </div>
         </div>
       )}
-      
-      {/* Controls Drawer */}
-      <div className={`fixed bottom-20 right-4 transition-transform duration-300 ease-in-out z-20 ${
-        showControls ? 'translate-x-0' : 'translate-x-full'
-      }`}>
-        <div className="bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg p-4 min-w-[280px] shadow-xl">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-white font-semibold text-sm">Node Controls</h3>
-            <button
-              onClick={() => setShowControls(false)}
-              className="text-gray-400 hover:text-white transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <kbd className="px-2 py-1 bg-white/10 rounded text-xs min-w-[50px] text-center">Click</kbd>
-              <span className="text-gray-300 text-sm">View node details</span>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="flex items-center space-x-1">
-                <kbd className="px-2 py-1 bg-white/10 rounded text-xs">Shift</kbd>
-                <span className="text-gray-400">+</span>
-                <kbd className="px-2 py-1 bg-white/10 rounded text-xs">Click</kbd>
-              </div>
-              <span className="text-gray-300 text-sm">Create new nodes</span>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="flex items-center space-x-1">
-                <kbd className="px-2 py-1 bg-white/10 rounded text-xs">Ctrl</kbd>
-                <span className="text-gray-400">+</span>
-                <kbd className="px-2 py-1 bg-white/10 rounded text-xs">Click</kbd>
-              </div>
-              <span className="text-gray-300 text-sm">Delete node</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Controls Toggle Button */}
-      <button
-        onClick={() => setShowControls(!showControls)}
-        className="fixed bottom-4 right-4 bg-blue-600/80 hover:bg-blue-600 backdrop-blur-sm border border-blue-400/30 rounded-full p-3 transition-all duration-200 z-30 shadow-lg"
-        title={showControls ? "Hide Controls" : "Show Controls"}
-      >
-        <svg 
-          className={`w-5 h-5 text-white transition-transform duration-200 ${showControls ? 'rotate-45' : ''}`} 
-          fill="none" 
-          stroke="currentColor" 
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </button>
     </div>
   );
 }

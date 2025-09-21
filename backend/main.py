@@ -32,6 +32,9 @@ app = FastAPI(title="STEM Connect API", description="A FastAPI backend for STEM 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db = psycopg2.connect(DATABASE_URL)
 
+# Set the database connection for ADK to use the same connection
+adk.set_database_connection(db)
+
 # ADK will handle AI configuration internally
 
 # /**
@@ -165,14 +168,7 @@ async def adk_send_message_endpoint(user_id: str, request: Request):
 @app.get("/adk/session-status/{user_id}")
 async def get_session_status(user_id: str):
     """Check if a session exists for a user (for debugging)."""
-    return {
-        "user_id": user_id, 
-        "session_exists": user_id in adk.active_sessions, 
-        "initial_message_sent": user_id in adk.initial_message_sent,
-        "active_sessions": list(adk.active_sessions.keys()), 
-        "initial_messages_sent": list(adk.initial_message_sent.keys()),
-        "total_sessions": len(adk.active_sessions)
-    }
+    return {"user_id": user_id, "session_exists": user_id in adk.active_sessions, "initial_message_sent": user_id in adk.initial_message_sent, "active_sessions": list(adk.active_sessions.keys()), "initial_messages_sent": list(adk.initial_message_sent.keys()), "total_sessions": len(adk.active_sessions)}
 
 
 @app.delete("/adk/session/{user_id}")
@@ -183,16 +179,12 @@ async def cleanup_session(user_id: str):
             live_request_queue, _, _ = adk.active_sessions[user_id]
             live_request_queue.close()
             del adk.active_sessions[user_id]
-        
+
         # Also clear initial message tracking
         if user_id in adk.initial_message_sent:
             del adk.initial_message_sent[user_id]
-            
-        return {
-            "message": f"Session {user_id} cleaned up", 
-            "active_sessions": list(adk.active_sessions.keys()),
-            "initial_messages_sent": list(adk.initial_message_sent.keys())
-        }
+
+        return {"message": f"Session {user_id} cleaned up", "active_sessions": list(adk.active_sessions.keys()), "initial_messages_sent": list(adk.initial_message_sent.keys())}
     except Exception as e:
         return {"error": f"Failed to cleanup session: {str(e)}"}
 
@@ -283,18 +275,16 @@ async def get_personal_info_endpoint(user_id: str):
                 (user_id,),
             )
             personal_info = cursor.fetchone()
-            
+
             if not personal_info:
                 raise HTTPException(status_code=404, detail="Personal information not found")
-            
+
             return dict(personal_info)
-            
+
     except Exception as e:
         if "Personal information not found" in str(e):
             raise e
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get personal information: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get personal information: {e}")
 
 
 @app.post("/api/save-personal-info")
@@ -322,8 +312,8 @@ async def save_personal_info_endpoint(request: dict):
 
             if existing_record:
                 # If it exists, UPDATE it
-                        cursor.execute(
-                            """
+                cursor.execute(
+                    """
                             UPDATE "stem-connect_personal_information"
                             SET name = %(name)s,
                                 gender = %(gender)s,
@@ -340,9 +330,9 @@ async def save_personal_info_endpoint(request: dict):
                                 challenges = %(challenges)s
                             WHERE "userId" = %(user_id)s
                             """,
-                            {**personal_info, "user_id": user_id},
-                        )
-                        print(f"[DB] Updated personal information for user {user_id}")
+                    {**personal_info, "user_id": user_id},
+                )
+                print(f"[DB] Updated personal information for user {user_id}")
             else:
                 # If it doesn't exist, INSERT a new record
                 # Get user's name from the user table to satisfy NOT NULL constraint

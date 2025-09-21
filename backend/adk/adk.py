@@ -7,9 +7,11 @@ import os
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, AsyncGenerator, Dict, List, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import google.generativeai as genai
+import psycopg2
+from dotenv import load_dotenv
 from google import genai as google_genai
 from google.adk.agents import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
@@ -18,6 +20,7 @@ from google.genai import types
 from google.genai.types import AudioTranscriptionConfig, Blob, Content, Part, PrebuiltVoiceConfig, SpeechConfig, VoiceConfig
 from minio import Minio
 from minio.error import S3Error
+from psycopg2.extras import RealDictCursor
 
 from .interviewer import agent as interviewer_agent
 from .node_maker import agent as node_maker_agent
@@ -27,6 +30,17 @@ active_sessions: Dict[str, Tuple[LiveRequestQueue, int, bool]] = {}  # Now store
 initial_message_sent: Dict[str, bool] = {}  # Track if initial message was sent to each user
 
 APP_NAME = "Stem-Connect ADK Integration"
+
+# Database connection will be imported from main.py to ensure consistency
+db = None
+
+
+def set_database_connection(database_connection):
+    """Set the database connection to use the same one as main.py"""
+    global db
+    db = database_connection
+    print(f"[ADK] Database connection set: {db is not None}")
+
 
 # Initialize MinIO client
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
@@ -42,7 +56,6 @@ minio_client = Minio(
 )
 
 # Initialize Gemini for image generation
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -193,12 +206,12 @@ async def get_or_create_session(user_id: str, is_audio: bool = False, force_new:
 async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[AsyncGenerator, LiveRequestQueue]:
     """Starts an agent session for a given user."""
     print(f"🔄 [ADK] TEXT-ONLY MODE - is_audio will be ignored: {is_audio}")
-    
+
     # Check if we've already sent initial message to this user
     should_send_initial = user_id not in initial_message_sent
-    
+
     live_events, live_request_queue, is_new = await get_or_create_session(user_id, False, force_new=False)
-    
+
     # Always send initial prompt for new sessions to trigger the agent
     if should_send_initial:
         initial_prompt = "Hello! Please introduce yourself and start the interview. The user will be typing their responses, and your responses will be read aloud to them. Please start by asking for their name and preferred pronouns."
@@ -206,10 +219,10 @@ async def start_agent_session(user_id: str, is_audio: bool = False) -> Tuple[Asy
 
         initial_content = Content(role="user", parts=[Part.from_text(text=initial_prompt)])
         live_request_queue.send_content(content=initial_content)
-        
+
         # Mark that initial message has been sent to this user
         initial_message_sent[user_id] = True
-        
+
         # Update session tracking
         if user_id in active_sessions:
             queue, msg_count, _ = active_sessions[user_id]
@@ -315,17 +328,68 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
             - Consider age-appropriate life events and transitions
             """
 
+        # Get personal information to inform event generation
+        print(f"[EVENT_GEN] Getting personal info for user_id: {user_id}")
+        personal_info = get_personal_info(user_id)
+        user_context = ""
+        user_name = "the user"
+
+        if personal_info:
+            user_name = personal_info.get("name", "the user")
+            # Build comprehensive user context from all available fields
+            user_context = f"""
+            
+            COMPREHENSIVE USER PROFILE (base ALL events heavily on this information):
+            
+            PERSONAL DETAILS:
+            - Full Name: {personal_info.get("name", "Unknown")}
+            - Gender: {personal_info.get("gender", "Not specified")}
+            - Current Title/Role: {personal_info.get("title", "Not provided")}
+            - Location: {personal_info.get("location", "Not provided")}
+            
+            BACKGROUND & STORY:
+            - Background: {personal_info.get("background", "Not provided")}
+            - Summary: {personal_info.get("summary", "Not provided")}
+            - Bio: {personal_info.get("bio", "Not provided")}
+            
+            SKILLS & INTERESTS:
+            - Skills: {personal_info.get("skills", "Not provided")}
+            - Interests: {personal_info.get("interests", "Not provided")}
+            
+            GOALS & VALUES:
+            - Primary Goal: {personal_info.get("goal", "Not provided")}
+            - Aspirations: {personal_info.get("aspirations", "Not provided")}
+            - Core Values: {personal_info.get("values", "Not provided")}
+            
+            CURRENT SITUATION:
+            - Current Challenges: {personal_info.get("challenges", "Not provided")}
+            
+            CRITICAL INSTRUCTIONS:
+            1. ALWAYS use "{user_name}" by name in all event descriptions - NEVER use "you", "he", "she", or "they"
+            2. Base events heavily on {user_name}'s specific background, skills, interests, and goals
+            3. Consider {user_name}'s current challenges and how they might evolve
+            4. Make events realistic for someone with {user_name}'s profile and location
+            5. Connect events to {user_name}'s stated aspirations and values
+            """
+
         adk_prompt = f"""
         {context_str}
         {life_stage_context}
+        {user_context}
         
-        Generate {num_nodes} different realistic life events. Make each event unique and diverse - they should represent different possible paths or choices.
+        Generate {num_nodes} different realistic life events for {user_name}. Each event must be:
+        - Directly relevant to {user_name}'s personal profile above
+        - Written using {user_name}'s actual name (never use pronouns)
+        - Based on {user_name}'s specific skills, interests, goals, and background
+        - Realistic for someone in {user_name}'s situation and location
         
         {time_guidance}
         {positivity_guidance}
         {node_type_guidance}
         
-        User's additional context: {prompt}
+        Additional context from {user_name}: {prompt}
+        
+        CRITICAL: Every event description must use "{user_name}" by name and be deeply connected to the personal profile provided. Draw from {user_name}'s background, current challenges, aspirations, and values to create meaningful, personalized life events.
         """
 
         # Use the node_maker agent through ADK
@@ -438,6 +502,53 @@ def get_mortality_context(total_months: int) -> str:
         return "With the substantial time that has passed, consider life's natural progression including potential health challenges, retirement, or end-of-life considerations."
 
 
+def get_personal_info(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get personal information for a user from the database."""
+    if not db:
+        print(f"[PERSONAL_INFO] No database connection available")
+        return None
+
+    try:
+        with db.cursor(cursor_factory=RealDictCursor) as cursor:
+            # First try to get from personal_information table
+            cursor.execute(
+                """
+                SELECT * FROM "stem-connect_personal_information"
+                WHERE "userId" = %s
+                """,
+                (user_id,),
+            )
+            personal_info = cursor.fetchone()
+
+            if personal_info:
+                info_dict = dict(personal_info)
+                print(f"[PERSONAL_INFO] Found personal info for user {user_id}:")
+                print(f"[PERSONAL_INFO] Name: {info_dict.get('name', 'NOT FOUND')}")
+                print(f"[PERSONAL_INFO] UserId: {info_dict.get('userId', 'NOT FOUND')}")
+                print(f"[PERSONAL_INFO] All fields: {list(info_dict.keys())}")
+                return info_dict
+            else:
+                print(f"[PERSONAL_INFO] No personal information found for user {user_id}")
+                # Try to get at least the name from the users table as fallback
+                cursor.execute(
+                    """
+                    SELECT name FROM "stem-connect_user"
+                    WHERE id = %s
+                    """,
+                    (user_id,),
+                )
+                user_record = cursor.fetchone()
+                if user_record:
+                    fallback_info = {"name": user_record["name"]}
+                    print(f"[PERSONAL_INFO] Using fallback name from users table: {fallback_info['name']}")
+                    return fallback_info
+                return None
+
+    except Exception as e:
+        print(f"[PERSONAL_INFO] Error getting personal information for user {user_id}: {e}")
+        return None
+
+
 def get_permanent_image_url(bucket_name: str, object_name: str) -> str:
     """Generate a permanent signed URL for MinIO object."""
     try:
@@ -482,23 +593,58 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
         aging_guidance = get_aging_context(cumulative_months)
         years_elapsed = cumulative_months / 12
 
-        # Create image prompt based on event with aging context only
-        image_prompt = f"""
-        Create a realistic, professional SQUARE image representing this life event: {event_name}
+        # Get personal information to inform image generation
+        print(f"[IMAGE_GEN] Getting personal info for user_id: {user_id}")
+        personal_info = get_personal_info(user_id)
+        user_context = ""
+        user_name = "the person"
+
+        if personal_info:
+            user_name = personal_info.get("name", "the person")
+            user_context = f"""
         
-        Context: {event_description}
+        COMPREHENSIVE USER CONTEXT FOR IMAGE GENERATION:
+        
+        PERSONAL DETAILS:
+        - Name: {personal_info.get("name", "Unknown")} (use this name, not pronouns)
+        - Gender: {personal_info.get("gender", "Not specified")}
+        - Current Role: {personal_info.get("title", "Not provided")}
+        - Location: {personal_info.get("location", "Not provided")}
+        
+        BACKGROUND & CHARACTERISTICS:
+        - Background: {personal_info.get("background", "Not provided")}
+        - Summary: {personal_info.get("summary", "Not provided")}
+        - Bio: {personal_info.get("bio", "Not provided")}
+        
+        INTERESTS & SKILLS:
+        - Skills: {personal_info.get("skills", "Not provided")}
+        - Interests: {personal_info.get("interests", "Not provided")}
+        
+        VALUES & GOALS:
+        - Core Values: {personal_info.get("values", "Not provided")}
+        - Goals: {personal_info.get("aspirations", "Not provided")}
+        - Current Challenges: {personal_info.get("challenges", "Not provided")}
+        
+        IMPORTANT: Create an image that reflects {user_name}'s specific background, role, interests, and the context of their life."""
+
+        # Create image prompt based on event with aging context and comprehensive user info
+        image_prompt = f"""
+        Create a realistic, professional SQUARE image representing this life event for {user_name}: {event_name}
+        
+        Event Context: {event_description}
         
         AGING CONTEXT ({years_elapsed:.1f} years have passed):
-        {aging_guidance}
+        {aging_guidance}{user_context}
         
         Style Requirements:
         - Photorealistic style with natural lighting
         - Square aspect ratio (1:1)
         - Show appropriate facial expressions and body language for this life event
-        - Include relevant environmental elements (medical office, workplace, home, etc.)
+        - Include relevant environmental elements based on {user_name}'s background and the event context
+        - Reflect {user_name}'s profession, interests, and location where appropriate
         
-        Please create an image that authentically represents this life milestone.
-        The image should be suitable for a professional life journey visualization.
+        CRITICAL: This image should authentically represent {user_name}'s life milestone based on their personal profile.
+        Make the image specific to {user_name}'s background, skills, and current situation. The image should be suitable for a professional life journey visualization.
         """
 
         if GEMINI_API_KEY:

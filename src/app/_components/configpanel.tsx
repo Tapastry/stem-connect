@@ -117,6 +117,51 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
           </p>
         </div>
 
+        {/* Node Controls Bar */}
+        <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3">
+          <h2 className="mb-3 text-sm font-medium text-gray-300">
+            Node Controls
+          </h2>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <kbd className="rounded bg-white/10 px-2 py-1 text-xs">
+                  Click
+                </kbd>
+                <span className="text-xs text-gray-300">View node details</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
+                  <kbd className="rounded bg-white/10 px-2 py-1 text-xs">
+                    Shift
+                  </kbd>
+                  <span className="text-xs text-gray-400">+</span>
+                  <kbd className="rounded bg-white/10 px-2 py-1 text-xs">
+                    Click
+                  </kbd>
+                </div>
+                <span className="text-xs text-gray-300">Create new nodes</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
+                  <kbd className="rounded bg-white/10 px-2 py-1 text-xs">
+                    Ctrl
+                  </kbd>
+                  <span className="text-xs text-gray-400">+</span>
+                  <kbd className="rounded bg-white/10 px-2 py-1 text-xs">
+                    Click
+                  </kbd>
+                </div>
+                <span className="text-xs text-gray-300">Delete node</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Update Profile Image Button */}
         <div className="flex justify-center">
           <button

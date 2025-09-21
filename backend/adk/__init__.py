@@ -5,7 +5,7 @@ This module provides Google ADK integration for the life path simulation app,
 including agent session management and communication handlers.
 """
 
-from .adk import AGENT_MAP, APP_NAME, active_sessions, agent_to_client_sse, create_one_time_session, generate_life_events_with_adk, generate_node_response, get_agent, get_available_agents, minio_client, send_message_to_agent, start_agent_session
+from .adk import AGENT_MAP, APP_NAME, active_sessions, agent_to_client_sse, create_one_time_session, generate_life_events_with_adk, generate_node_response, get_agent, get_available_agents, get_personal_info, minio_client, send_message_to_agent, set_database_connection, start_agent_session
 from .interviewer import AGENT_INSTRUCTION as INTERVIEWER_INSTRUCTION
 from .interviewer import InterviewerAgent
 from .interviewer import agent as interviewer_agent
@@ -24,6 +24,8 @@ __all__ = [
     "create_one_time_session",
     "generate_node_response",
     "generate_life_events_with_adk",
+    "get_personal_info",
+    "set_database_connection",
     # MinIO client
     "minio_client",
     # Agent management
