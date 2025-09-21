@@ -17,7 +17,7 @@ class Node(BaseModel):
     type: str
     image_name: str
     image_url: Optional[str] = ""
-    timeInMonths: int
+    time: str # Keep as string to accommodate different formats
     title: str
     created_at: datetime
     user_id: str

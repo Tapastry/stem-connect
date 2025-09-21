@@ -9,19 +9,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { conversation_history } = await request.json();
+    // Get the original request body
+    const requestBody = await request.json();
 
-    // Check interview completeness with the Python backend
+    // Forward the entire original body to the Python backend
     const backendResponse = await fetch(
-      `${process.env.BACKEND_URL || 'http://localhost:8000'}/adk/check-completeness/${session.user.id}`,
+      `${process.env.BACKEND_URL || 'http://localhost:8000'}/adk/check-completeness`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          conversation_history: conversation_history,
-        }),
+        body: JSON.stringify(requestBody),
       }
     );
 

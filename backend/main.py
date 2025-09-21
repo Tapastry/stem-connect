@@ -17,6 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from models import AddNodeRequest, AddPersonalInformationRequest, Link, Node, NodeRequest, NodeResponse, UpdatePersonalInformationRequest
+from models.requests import (
+    AddNodeRequest,
+    InterviewCompletenessRequest,
+    UpdateNodeRequest,
+    AddPersonalInformationRequest,
+    UpdatePersonalInformationRequest
+)
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
@@ -178,22 +185,168 @@ async def cleanup_session(user_id: str):
         return {"message": f"No session found for {user_id}", "active_sessions": list(adk.active_sessions.keys())}
 
 
-@app.post("/adk/check-completeness/{user_id}")
-async def check_interview_completeness_endpoint(user_id: str, request: Request):
-    """Check if the interview has gathered sufficient information."""
+@app.post("/adk/check-completeness")
+async def check_interview_completeness_endpoint(request: InterviewCompletenessRequest):
+    """
+    Endpoint to check for interview completeness and upsert personal information.
+    """
+    print(f"[COMPLETENESS] Received request for user: {request.user_id}")
+    print(f"[COMPLETENESS] Conversation history length: {len(request.conversation_history)}")
+    print(f"[COMPLETENESS] Sample conversation: {request.conversation_history[:2] if request.conversation_history else 'Empty'}")
+    
+    result = await adk.check_interview_completeness(
+        request.user_id, request.conversation_history
+    )
+    if result.get("is_complete"):
+        personal_info_data = result.get("personal_info_data")
+        if personal_info_data:
+            try:
+                with db.cursor() as cursor:
+                    # First, check if a record already exists for this user
+                    cursor.execute(
+                        """
+                        SELECT id FROM "stem-connect_personal_information"
+                        WHERE "userId" = %s
+                        """,
+                        (request.user_id,),
+                    )
+                    existing_record = cursor.fetchone()
+
+                    if existing_record:
+                        # If it exists, UPDATE it
+                        cursor.execute(
+                            """
+                            UPDATE "stem-connect_personal_information"
+                            SET bio = %(bio)s,
+                                goal = %(goal)s,
+                                location = %(location)s,
+                                interests = %(interests)s,
+                                skills = %(skills)s,
+                                title = %(title)s,
+                                summary = %(summary)s,
+                                background = %(background)s,
+                                aspirations = %(aspirations)s,
+                                "values" = %(values)s,
+                                challenges = %(challenges)s
+                            WHERE "userId" = %(user_id)s
+                            """,
+                            {**personal_info_data, "user_id": request.user_id},
+                        )
+                        print(f"[DB] Updated personal information for user {request.user_id}")
+                    else:
+                        # If it doesn't exist, INSERT a new record
+                        # Get user's name from the user table to satisfy NOT NULL constraint
+                        cursor.execute(
+                            'SELECT name FROM "stem-connect_user" WHERE id = %s',
+                            (request.user_id,)
+                        )
+                        user_record = cursor.fetchone()
+                        user_name = user_record[0] if user_record else "New User"
+                        
+                        new_id = str(uuid.uuid4())
+
+                        cursor.execute(
+                            """
+                            INSERT INTO "stem-connect_personal_information"
+                            (id, "userId", name, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
+                            VALUES (%(id)s, %(user_id)s, %(name)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
+                            """,
+                            {
+                                "id": new_id,
+                                "user_id": request.user_id,
+                                "name": user_name,
+                                **personal_info_data
+                            },
+                        )
+                        print(f"[DB] Created personal information for user {request.user_id}")
+                    db.commit()
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to save personal information: {e}"
+                )
+    return result
+
+
+@app.post("/api/save-personal-info")
+async def save_personal_info_endpoint(request: dict):
+    """
+    Endpoint to save personal information extracted from the interview.
+    """
+    user_id = request.get("user_id")
+    personal_info = request.get("personal_info", {})
+    
+    print(f"[SAVE PERSONAL INFO] Received data for user: {user_id}")
+    print(f"[SAVE PERSONAL INFO] Data: {personal_info}")
+    
     try:
-        body = await request.json()
-        conversation_history = body.get("conversation_history", "")
+        with db.cursor() as cursor:
+            # First, check if a record already exists for this user
+            cursor.execute(
+                """
+                SELECT id FROM "stem-connect_personal_information"
+                WHERE "userId" = %s
+                """,
+                (user_id,),
+            )
+            existing_record = cursor.fetchone()
 
-        if not conversation_history:
-            raise HTTPException(status_code=400, detail="Conversation history is required")
+            if existing_record:
+                # If it exists, UPDATE it
+                cursor.execute(
+                    """
+                    UPDATE "stem-connect_personal_information"
+                    SET bio = %(bio)s,
+                        goal = %(goal)s,
+                        location = %(location)s,
+                        interests = %(interests)s,
+                        skills = %(skills)s,
+                        title = %(title)s,
+                        summary = %(summary)s,
+                        background = %(background)s,
+                        aspirations = %(aspirations)s,
+                        "values" = %(values)s,
+                        challenges = %(challenges)s
+                    WHERE "userId" = %(user_id)s
+                    """,
+                    {**personal_info, "user_id": user_id},
+                )
+                print(f"[DB] Updated personal information for user {user_id}")
+            else:
+                # If it doesn't exist, INSERT a new record
+                # Get user's name from the user table to satisfy NOT NULL constraint
+                cursor.execute(
+                    'SELECT name FROM "stem-connect_user" WHERE id = %s',
+                    (user_id,)
+                )
+                user_record = cursor.fetchone()
+                user_name = user_record[0] if user_record else "New User"
+                
+                new_id = str(uuid.uuid4())
 
-        completeness_result = await adk.check_interview_completeness(user_id, conversation_history)
-
-        return {"status": "checked", **completeness_result}
-
+                cursor.execute(
+                    """
+                    INSERT INTO "stem-connect_personal_information"
+                    (id, "userId", name, bio, goal, location, interests, skills, title, summary, background, aspirations, "values", challenges)
+                    VALUES (%(id)s, %(user_id)s, %(name)s, %(bio)s, %(goal)s, %(location)s, %(interests)s, %(skills)s, %(title)s, %(summary)s, %(background)s, %(aspirations)s, %(values)s, %(challenges)s)
+                    """,
+                    {
+                        "id": new_id,
+                        "user_id": user_id,
+                        "name": user_name,
+                        **personal_info
+                    },
+                )
+                print(f"[DB] Created personal information for user {user_id}")
+            db.commit()
+            
+        return {"message": "Personal information saved successfully"}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save personal information: {e}"
+        )
 
 
 # Generate a Node with AI, Insert to database, and return the node
