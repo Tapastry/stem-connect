@@ -15,6 +15,7 @@ interface ConfigPanelProps {
   setConfig: (config: Config | ((prev: Config) => Config)) => void;
   onGenerate?: (config: Config) => void;
   onReset?: () => void;
+  user: any; // Add user prop
 }
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({
@@ -22,6 +23,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   setConfig,
   onGenerate,
   onReset,
+  user,
 }) => {
   // Get currently selected node types as an array
   const getSelectedNodeTypes = (): string[] => {
@@ -113,6 +115,68 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
           <p className="text-sm text-gray-400">
             Configure your life event visualization
           </p>
+        </div>
+
+        {/* Update Profile Image Button */}
+        <div className="flex justify-center">
+          <button
+            onClick={() => {
+              // Trigger file input for image update
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = "image/*";
+              input.onchange = async (e: any) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  console.log("🔍 User object:", user);
+                  console.log("🔍 User ID:", user.id);
+
+                  // Try different possible ID fields
+                  const userId =
+                    user.id || (user as any).sub || (user as any).email;
+
+                  if (!userId) {
+                    console.error(
+                      "❌ No user ID available for upload in config panel",
+                    );
+                    return;
+                  }
+
+                  console.log("📤 Config panel upload using user ID:", userId);
+
+                  const formData = new FormData();
+                  formData.append("image", file);
+
+                  try {
+                    const response = await fetch(
+                      `http://localhost:8000/api/upload-user-image/${userId}`,
+                      {
+                        method: "POST",
+                        body: formData,
+                      },
+                    );
+
+                    if (response.ok) {
+                      console.log("✅ User image updated successfully");
+                    } else {
+                      const errorData = await response.json().catch(() => ({}));
+                      console.error(
+                        "Failed to update image:",
+                        response.status,
+                        errorData,
+                      );
+                    }
+                  } catch (error) {
+                    console.error("Error updating image:", error);
+                  }
+                }
+              };
+              input.click();
+            }}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white transition duration-150 hover:bg-indigo-500 focus:ring-2 focus:ring-indigo-500"
+          >
+            📷 Update Profile Image
+          </button>
         </div>
 
         {/* Parameter Controls */}

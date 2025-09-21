@@ -100,6 +100,10 @@ export default function Life({
         colors[node.id] = "red";
         return;
       }
+      if (node.type === "loading") {
+        colors[node.id] = "#6b7280"; // Gray for loading nodes
+        return;
+      }
       if (map.has(node.id)) colors[node.id] = "yellow";
       else colors[node.id] = "green";
     });
@@ -181,6 +185,16 @@ export default function Life({
               metalness: 0.6,
             });
             const sphere = new THREE.Mesh(geometry, material);
+
+            // Add pulsating animation for loading nodes
+            if (node.type === "loading") {
+              const time = Date.now() * 0.005;
+              const scale = 1 + Math.sin(time) * 0.2;
+              sphere.scale.setScalar(scale);
+              material.opacity = 0.7 + Math.sin(time) * 0.3;
+              material.transparent = true;
+            }
+
             group.add(sphere);
 
             // === Highlight effect (hover or special node) ===
@@ -261,7 +275,7 @@ export default function Life({
             // Use the timeInMonths value stored with the link to determine distance
             const timeInMonths = link.timeInMonths || 1;
             // Scale the distance: 1 month = 20 units, max 240 units (12 months * 20)
-            return Math.min(timeInMonths * 20, 240);
+            return Math.min(timeInMonths * 20, 500);
           }}
           onNodeDragEnd={(node) => {
             // Keep "Now" fixed, but allow other nodes to be positioned

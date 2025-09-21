@@ -57,8 +57,17 @@ const onNodeClick = async (
   currentLinks: Link[],
   setNodes: (nodes: Node[]) => void,
   setLinks: (links: Link[]) => void,
+  setScreen: (screen: string) => void,
+  isGenerating: boolean,
+  setIsGenerating: (generating: boolean) => void,
 ) => {
   console.log("NODE CLICKED", clickedNodeId, config);
+
+  // Prevent multiple clicks while generating
+  if (isGenerating) {
+    console.log("Already generating, ignoring click");
+    return;
+  }
 
   // Find the clicked node
   const clickedNode = currentNodes.find((node) => node.id === clickedNodeId);
@@ -93,6 +102,49 @@ const onNodeClick = async (
     node_type: config.type,
     positivity: config.positivity,
   };
+
+  // Set generating state and switch to graph tab
+  setIsGenerating(true);
+  setScreen("graph");
+
+  // Create temporary loading nodes
+  const loadingNodes: Node[] = [];
+  for (let i = 0; i < config.num_nodes; i++) {
+    const angle = (i / config.num_nodes) * 2 * Math.PI;
+    const distance = 4;
+
+    const loadingNode: Node = {
+      id: `loading-${i}`,
+      x: clickedNode.x + Math.cos(angle) * distance,
+      y: clickedNode.y + Math.sin(angle) * distance,
+      z: clickedNode.z + (Math.random() - 0.5) * 4,
+      color: "#6b7280", // Gray color for loading
+      name: "Generating...",
+      title: "Loading",
+      description: "Generating new life event...",
+      type: "loading",
+      imageName: "",
+      imageUrl: "",
+      timeInMonths: 1,
+      createdAt: new Date().toISOString(),
+      userId: user.id,
+    };
+    loadingNodes.push(loadingNode);
+  }
+
+  // Add loading nodes immediately
+  const nodesWithLoading = [...currentNodes, ...loadingNodes];
+  setNodes(nodesWithLoading);
+
+  // Create temporary links for loading nodes
+  const loadingLinks = loadingNodes.map((node) => ({
+    id: `loading-link-${node.id}`,
+    source: clickedNode.id,
+    target: node.id,
+    timeInMonths: 1,
+  }));
+  const linksWithLoading = [...currentLinks, ...loadingLinks];
+  setLinks(linksWithLoading);
 
   try {
     // Call the backend API running on port 8000
@@ -156,30 +208,50 @@ const onNodeClick = async (
       },
     );
 
-    // Add new nodes to existing nodes
-    const updatedNodes = [...currentNodes, ...newFrontendNodes];
+    // Remove loading nodes and add real nodes
+    const nodesWithoutLoading = currentNodes.filter(
+      (node) => !node.id.startsWith("loading-"),
+    );
+    const updatedNodes = [...nodesWithoutLoading, ...newFrontendNodes];
     console.log(
       "Setting nodes to:",
       updatedNodes.map((n) => n.id),
     );
     setNodes(updatedNodes);
 
-    // Generate links from the clicked node to all new nodes
+    // Remove loading links and add real links
+    const linksWithoutLoading = currentLinks.filter(
+      (link) => !link.id.startsWith("loading-link-"),
+    );
     const newLinks = newFrontendNodes.map((node) => ({
       id: `${clickedNode.id}-${node.id}`,
       source: clickedNode.id,
       target: node.id,
       timeInMonths: config.time_in_months, // Store the time value with the link
     }));
-    const updatedLinks = [...currentLinks, ...newLinks];
+    const updatedLinks = [...linksWithoutLoading, ...newLinks];
     console.log("New links created:", newLinks);
     console.log(
       "Setting links to:",
       updatedLinks.map((l) => `${l.source}->${l.target}`),
     );
     setLinks(updatedLinks);
+
+    // Clear generating state
+    setIsGenerating(false);
   } catch (error) {
     console.error("Error generating nodes:", error);
+
+    // Remove loading nodes on error and clear generating state
+    const nodesWithoutLoading = currentNodes.filter(
+      (node) => !node.id.startsWith("loading-"),
+    );
+    const linksWithoutLoading = currentLinks.filter(
+      (link) => !link.id.startsWith("loading-link-"),
+    );
+    setNodes(nodesWithoutLoading);
+    setLinks(linksWithoutLoading);
+    setIsGenerating(false);
   }
 };
 
@@ -188,6 +260,8 @@ const onNodeDelete = async (
   user: User,
   setNodes: (nodes: Node[]) => void,
   setLinks: (links: Link[]) => void,
+  setNodesToView: (nodes: Node[]) => void,
+  setScreen: (screen: string) => void,
 ) => {
   console.log("DELETING NODE", nodeId);
 
@@ -254,6 +328,10 @@ const onNodeDelete = async (
 
       setNodes(frontendNodes);
       setLinks(frontendLinks);
+
+      // Clear node view and switch back to config tab
+      setNodesToView([]);
+      setScreen("graph");
     }
   } catch (error) {
     console.error("Error deleting node:", error);
@@ -310,6 +388,7 @@ const onNodeViewClick = (
   highlightedPath: string[],
   nodes: Node[],
   setNodesToView: (nodes: Node[]) => void,
+  setScreen: (screen: string) => void,
 ) => {
   console.log("Setting node view for:", nodeId);
   console.log("Using highlighted path:", highlightedPath);
@@ -324,6 +403,13 @@ const onNodeViewClick = (
     pathNodes.map((n) => n.id),
   );
   setNodesToView(pathNodes);
+
+  // Switch to node view tab
+  if (nodeId === "Now") {
+    setScreen("graph");
+  } else {
+    setScreen("nodes");
+  }
 };
 
 export default function LifeWrap({ user }: { user: User }) {
@@ -355,6 +441,11 @@ export default function LifeWrap({ user }: { user: User }) {
     url: string;
     alt: string;
   } | null>(null);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [hasUserImage, setHasUserImage] = useState<boolean | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const fgRef = useCallback((node: any) => {
     // Check if the node is being mounted
     if (node !== null) {
@@ -369,6 +460,44 @@ export default function LifeWrap({ user }: { user: User }) {
       });
     }
   }, []);
+
+  // Check if user image exists
+  useEffect(() => {
+    const checkUserImage = async () => {
+      try {
+        console.log("🔍 Checking user image for user:", user);
+        console.log("🔍 User ID:", user.id);
+        console.log("🔍 User object keys:", Object.keys(user));
+        console.log("🔍 User object:", JSON.stringify(user, null, 2));
+
+        // Try different possible ID fields
+        const userId = user.id || (user as any).sub || (user as any).email;
+
+        if (!userId) {
+          console.error("❌ No user ID available in any field");
+          setHasUserImage(false);
+          return;
+        }
+
+        console.log("🔍 Using user ID:", userId);
+
+        const response = await fetch(
+          `http://localhost:8000/api/user-image-exists/${userId}`,
+        );
+        const data = await response.json();
+        setHasUserImage(data.exists);
+        if (!data.exists) {
+          setShowUploadDialog(true);
+        }
+      } catch (error) {
+        console.error("Error checking user image:", error);
+        setHasUserImage(false);
+        setShowUploadDialog(true);
+      }
+    };
+
+    checkUserImage();
+  }, [user.id]);
 
   // Load graph data from database on mount
   useEffect(() => {
@@ -512,12 +641,13 @@ export default function LifeWrap({ user }: { user: User }) {
         {/* Tab Content */}
         <div className="flex-1 overflow-hidden p-4">
           {screen === "graph" ? (
-            <div className="h-full">
+            <div className="h-full w-full">
               <ConfigPanel
                 config={config}
                 setConfig={setConfig}
                 onGenerate={() => 1}
                 onReset={() => 1}
+                user={user}
               />
             </div>
           ) : (
@@ -655,13 +785,29 @@ export default function LifeWrap({ user }: { user: User }) {
               links,
               setNodes,
               setLinks,
+              setScreen,
+              isGenerating,
+              setIsGenerating,
             );
           }}
           handleNodeDelete={(nodeId: string) => {
-            onNodeDelete(nodeId, user, setNodes, setLinks);
+            onNodeDelete(
+              nodeId,
+              user,
+              setNodes,
+              setLinks,
+              setNodesToView,
+              setScreen,
+            );
           }}
           handleNodeViewClick={(nodeId: string) => {
-            onNodeViewClick(nodeId, highlightedPath, nodes, setNodesToView);
+            onNodeViewClick(
+              nodeId,
+              highlightedPath,
+              nodes,
+              setNodesToView,
+              setScreen,
+            );
           }}
           fgRef={fgRef}
         />
@@ -689,6 +835,107 @@ export default function LifeWrap({ user }: { user: User }) {
             >
               ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* User Image Upload Dialog */}
+      {showUploadDialog && (
+        <div className="bg-opacity-80 fixed inset-0 z-50 flex items-center justify-center bg-black">
+          <div className="mx-4 w-full max-w-md rounded-lg border border-gray-700 bg-gray-900 p-6">
+            <h2 className="mb-4 text-xl font-bold text-white">
+              Upload Your Photo
+            </h2>
+            <p className="mb-4 text-gray-400">
+              To generate personalized life event images, please upload a photo
+              of yourself.
+            </p>
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setSelectedFile(file);
+                }
+              }}
+              className="mb-4 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-white"
+            />
+
+            {selectedFile && (
+              <div className="mb-4 text-sm text-gray-400">
+                Selected: {selectedFile.name}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowUploadDialog(false);
+                  setHasUserImage(false);
+                  setSelectedFile(null);
+                }}
+                className="flex-1 rounded bg-gray-700 px-4 py-2 text-white transition-colors hover:bg-gray-600"
+              >
+                Skip for now
+              </button>
+              <button
+                onClick={async () => {
+                  if (!selectedFile) return;
+
+                  console.log("📤 Uploading image for user:", user);
+                  console.log("📤 User ID:", user.id);
+
+                  // Try different possible ID fields
+                  const userId =
+                    user.id || (user as any).sub || (user as any).email;
+
+                  if (!userId) {
+                    console.error("❌ No user ID available for upload");
+                    return;
+                  }
+
+                  console.log("📤 Using user ID for upload:", userId);
+
+                  setIsUploading(true);
+                  const formData = new FormData();
+                  formData.append("image", selectedFile);
+
+                  try {
+                    const response = await fetch(
+                      `http://localhost:8000/api/upload-user-image/${userId}`,
+                      {
+                        method: "POST",
+                        body: formData,
+                      },
+                    );
+
+                    if (response.ok) {
+                      setHasUserImage(true);
+                      setShowUploadDialog(false);
+                      setSelectedFile(null);
+                      console.log("✅ User image uploaded successfully");
+                    } else {
+                      const errorData = await response.json().catch(() => ({}));
+                      console.error(
+                        "Failed to upload image:",
+                        response.status,
+                        errorData,
+                      );
+                    }
+                  } catch (error) {
+                    console.error("Error uploading image:", error);
+                  } finally {
+                    setIsUploading(false);
+                  }
+                }}
+                disabled={!selectedFile || isUploading}
+                className="flex-1 rounded bg-indigo-600 px-4 py-2 text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-500"
+              >
+                {isUploading ? "Uploading..." : "Upload Image"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -47,11 +47,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-print(f"🔑 [IMAGE GEN] GEMINI_API_KEY loaded: {'Yes' if GEMINI_API_KEY else 'No'}")
+print(f"[IMAGE GEN] GEMINI_API_KEY loaded: {'Yes' if GEMINI_API_KEY else 'No'}")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     image_model = genai.GenerativeModel("gemini-2.5-flash")
-    print(f"✅ [IMAGE GEN] Gemini configured successfully")
+    print(f"[IMAGE GEN] Gemini configured successfully")
 
 # Agent registry - map of agent names to agent instances
 AGENT_MAP = {
@@ -267,8 +267,18 @@ async def generate_node_response(prompt: str, agent_name: str = "interviewer_age
     return response.output
 
 
-async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int, user_id: str) -> List[dict]:
+async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_type: str, time_in_months: int, positivity: int, num_nodes: int, user_id: str, highlight_path: List[str] = None, all_links: List[dict] = None) -> List[dict]:
     """Generate life events using the node_maker agent through ADK."""
+
+    # Calculate cumulative time from highlight path
+    cumulative_months = 0
+    aging_context = ""
+    mortality_context = ""
+
+    if highlight_path and all_links:
+        cumulative_months = calculate_cumulative_time(highlight_path, all_links)
+        aging_context = get_aging_context(cumulative_months)
+        mortality_context = get_mortality_context(cumulative_months)
 
     # Handle random values for each event (define outside try block)
     events_config = []
@@ -314,8 +324,22 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
 
         node_type_guidance = f"The events should be related to: {node_type}" if node_type else ""
 
+        # Add aging and life stage context
+        life_stage_context = ""
+        if cumulative_months > 0:
+            years_elapsed = cumulative_months / 12
+            life_stage_context = f"""
+            
+            IMPORTANT LIFE STAGE CONTEXT:
+            - {years_elapsed:.1f} years have passed since the beginning of this life journey
+            - {aging_context}
+            - {mortality_context}
+            - Consider age-appropriate life events and transitions
+            """
+
         adk_prompt = f"""
         {context_str}
+        {life_stage_context}
         
         Generate {num_nodes} different realistic life events. Make each event unique and diverse - they should represent different possible paths or choices.
         
@@ -341,7 +365,7 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
                 if len(events) >= num_nodes:
                     selected_events = events[:num_nodes]
                     # Generate images for all events in parallel
-                    print(f"🖼️ Starting PARALLEL image generation for {len(selected_events)} events for user {user_id}")
+                    print(f"Starting PARALLEL image generation for {len(selected_events)} events for user {user_id}")
 
                     # Create parallel tasks for image generation
                     image_tasks = []
@@ -350,26 +374,28 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
                             user_id=user_id,
                             event_name=event["name"],
                             event_description=event["description"],
+                            cumulative_months=cumulative_months,
+                            positivity_score=event.get("positivity_score", 0.5),
                         )
                         image_tasks.append(task)
 
                     # Execute all image generation tasks in parallel
-                    print(f"⚡ [IMAGE GEN] Running {len(image_tasks)} image generation tasks in parallel...")
+                    print(f"[IMAGE GEN] Running {len(image_tasks)} image generation tasks in parallel...")
                     image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
 
                     # Process results and assign to events
                     for i, (event, result) in enumerate(zip(selected_events, image_results)):
                         if isinstance(result, Exception):
-                            print(f"❌ Failed to generate image for {event['name']}: {result}")
+                            print(f"Failed to generate image for {event['name']}: {result}")
                             event["image_name"] = ""
                             event["image_url"] = ""
                         else:
                             image_filename, signed_url = result
                             event["image_name"] = image_filename
                             event["image_url"] = signed_url
-                            print(f"✅ Image generated for {event['name']}: {image_filename}")
+                            print(f"Image generated for {event['name']}: {image_filename}")
 
-                    print(f"🎉 [IMAGE GEN] Parallel image generation completed for {len(selected_events)} events")
+                    print(f"[IMAGE GEN] Parallel image generation completed for {len(selected_events)} events")
                     return selected_events
                 else:
                     # Pad with fallback events if not enough generated
@@ -413,6 +439,55 @@ async def generate_life_events_with_adk(prior_nodes: List, prompt: str, node_typ
         ]
 
 
+def calculate_cumulative_time(highlight_path: List[str], all_links: List[dict]) -> int:
+    """Calculate total months elapsed from start to end of highlight path."""
+    total_months = 0
+
+    # Go through the path and sum up the timeInMonths from each link
+    for i in range(len(highlight_path) - 1):
+        source_node = highlight_path[i + 1]  # Next node in path (links go from later to earlier)
+        target_node = highlight_path[i]  # Current node in path
+
+        # Find the link between these nodes
+        for link in all_links:
+            if link.get("source") == source_node and link.get("target") == target_node:
+                time_months = link.get("timeInMonths", 1)
+                total_months += time_months
+                print(f"[TIME CALC] {source_node} → {target_node}: +{time_months} months (total: {total_months})")
+                break
+    return total_months
+
+
+def get_aging_context(total_months: int) -> str:
+    """Generate aging context based on elapsed time."""
+    years = total_months / 12
+
+    if years < 2:
+        return "The person should look the same age as in the reference image."
+    elif years < 5:
+        return "The person should look slightly older, with subtle signs of maturity."
+    elif years < 10:
+        return "The person should look noticeably older, showing clear signs of aging and maturity."
+    elif years < 20:
+        return "The person should look significantly older, with visible aging, possible gray hair, and mature features."
+    elif years < 30:
+        return "The person should look much older, with considerable aging, gray/white hair, and mature/elderly features."
+    else:
+        return "The person should look elderly, with significant aging, white hair, wrinkles, and the wisdom of advanced age."
+
+
+def get_mortality_context(total_months: int) -> str:
+    """Generate mortality context for AI agent based on elapsed time."""
+    years = total_months / 12
+
+    if years < 30:
+        return ""  # No special mortality context for younger ages
+    elif years < 50:
+        return "Consider that significant time has passed. Health and mortality may become relevant considerations."
+    else:
+        return "With the substantial time that has passed, consider life's natural progression including potential health challenges, retirement, or end-of-life considerations."
+
+
 def get_permanent_image_url(bucket_name: str, object_name: str) -> str:
     """Generate a permanent signed URL for MinIO object (7 days expiry)."""
     try:
@@ -421,13 +496,13 @@ def get_permanent_image_url(bucket_name: str, object_name: str) -> str:
         print(f"🔗 [MINIO] Generated signed URL for {bucket_name}/{object_name}")
         return url
     except S3Error as e:
-        print(f"❌ [MINIO] Error generating signed URL: {e}")
+        print(f"[MINIO] Error generating signed URL: {e}")
         return ""
 
 
-async def generate_event_image(user_id: str, event_name: str, event_description: str) -> tuple[str, str]:
+async def generate_event_image(user_id: str, event_name: str, event_description: str, cumulative_months: int = 0, positivity_score: float = 0.5) -> tuple[str, str]:
     """Generate an image for a life event using user's base image as context with Nano Banana."""
-    print(f"🖼️ [IMAGE GEN] Starting image generation for event: {event_name}, user: {user_id}")
+    print(f"[IMAGE GEN] Starting image generation for event: {event_name}, user: {user_id}")
     try:
         # Ensure buckets exist
         user_bucket = "user-images"
@@ -444,42 +519,79 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
         user_image_name = f"{user_id}.png"
         user_image_data = None
 
-        print(f"🔍 [IMAGE GEN] Looking for base image: {user_bucket}/{user_image_name}")
+        print(f"[IMAGE GEN] Looking for base image: {user_bucket}/{user_image_name}")
         try:
             response = minio_client.get_object(user_bucket, user_image_name)
             user_image_data = response.read()
-            print(f"✅ [IMAGE GEN] Retrieved base image for user {user_id}: {len(user_image_data)} bytes")
+            print(f"[IMAGE GEN] Retrieved base image for user {user_id}: {len(user_image_data)} bytes")
         except S3Error as e:
-            print(f"❌ [IMAGE GEN] No base image found for user {user_id}: {e}")
-            print(f"🔄 [IMAGE GEN] Will generate image without base image context")
+            print(f"[IMAGE GEN] No base image found for user {user_id}: {e}")
+            print(f"[IMAGE GEN] Will generate image without base image context")
 
-        # Create image prompt based on event
+        # Get aging context based on cumulative time
+        aging_guidance = get_aging_context(cumulative_months)
+        years_elapsed = cumulative_months / 12
+
+        # Determine mood and style based on positivity score
+        if positivity_score >= 0.8:
+            mood_guidance = "joyful, celebratory mood with bright, warm colors and happy expressions"
+            lighting = "bright, golden hour lighting"
+            emotional_context = "Show happiness, achievement, and celebration"
+        elif positivity_score >= 0.6:
+            mood_guidance = "positive, hopeful mood with pleasant colors and smiles"
+            lighting = "warm, natural lighting"
+            emotional_context = "Show contentment and optimism"
+        elif positivity_score >= 0.4:
+            mood_guidance = "neutral, realistic mood with natural colors and calm expressions"
+            lighting = "balanced, natural lighting"
+            emotional_context = "Show normal life circumstances"
+        elif positivity_score >= 0.2:
+            mood_guidance = "concerned, stressful mood with muted colors and worried expressions"
+            lighting = "dim or overcast lighting with cooler tones"
+            emotional_context = "Show worry, stress, and difficulty"
+        else:
+            mood_guidance = "serious, challenging mood with darker colors and expressions of concern or sadness"
+            lighting = "subdued lighting with cooler, muted tones"
+            emotional_context = "Show the difficulty and emotional weight of challenging life circumstances"
+
+        # Create image prompt based on event with aging and positivity context
         image_prompt = f"""
-        Using this person's image as reference, create a realistic, professional SQUARE image representing this life event: {event_name}
+        Create a realistic, professional SQUARE image representing this life event: {event_name}
         
         Context: {event_description}
         
-        Style: Photorealistic, warm lighting, inspiring and hopeful mood
-        Focus: Show this person experiencing or achieving this life milestone
-        Composition: Square aspect ratio (1:1), clean, modern, with good depth of field
-        Include: Elements that represent the specific life event while maintaining the person's appearance
+        AGING CONTEXT ({years_elapsed:.1f} years have passed):
+        {aging_guidance}
         
-        Make it suitable for a professional life journey visualization. The image must be square format.
+        EMOTIONAL TONE (Positivity: {positivity_score:.1f}/1.0):
+        {mood_guidance}
+        
+        VISUAL DIRECTION: {emotional_context}
+        
+        Style Requirements:
+        - Photorealistic style with {lighting}
+        - Square aspect ratio (1:1)
+        - Show appropriate facial expressions and body language for this life event
+        - Use colors and lighting that match the emotional context
+        - Include relevant environmental elements (medical office, workplace, home, etc.)
+        
+        Please create an image that authentically represents this life milestone with appropriate emotional tone.
+        The image should be suitable for a professional life journey visualization.
         """
 
         if GEMINI_API_KEY:
-            print(f"🤖 [IMAGE GEN] GEMINI_API_KEY found, proceeding with image generation")
+            print(f"[IMAGE GEN] GEMINI_API_KEY found, proceeding with image generation")
 
             # Initialize Google GenAI client for image generation
             client = google_genai.Client(api_key=GEMINI_API_KEY)
 
             model = "gemini-2.5-flash-image-preview"
-            print(f"📱 [IMAGE GEN] Using model: {model}")
+            print(f"[IMAGE GEN] Using model: {model}")
 
             # Create content with user image as context + text prompt (if base image exists)
             parts = []
             if user_image_data:
-                print(f"🖼️ [IMAGE GEN] Adding user base image as context")
+                print(f"[IMAGE GEN] Adding user base image as context")
                 parts.append(
                     types.Part.from_bytes(
                         mime_type="image/png",
@@ -487,7 +599,7 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
                     )
                 )
             else:
-                print(f"⚠️ [IMAGE GEN] No base image, generating without user context")
+                print(f"[IMAGE GEN] No base image, generating without user context")
 
             parts.append(types.Part.from_text(text=image_prompt))
 
@@ -498,7 +610,7 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
                 ),
             ]
 
-            print(f"📝 [IMAGE GEN] Prompt: {image_prompt[:100]}...")
+            print(f"[IMAGE GEN] Prompt: {image_prompt[:100]}...")
             generate_content_config = types.GenerateContentConfig(
                 response_modalities=[
                     "IMAGE",
@@ -506,7 +618,7 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
                 ],
             )
 
-            print(f"🚀 [IMAGE GEN] Starting Nano Banana generation for {event_name}...")
+            print(f"[IMAGE GEN] Starting Nano Banana generation for {event_name}...")
 
             # Generate image using Nano Banana (run in executor for true async)
             def _generate_image_sync():
@@ -517,25 +629,25 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
                     config=generate_content_config,
                 ):
                     chunk_count += 1
-                    print(f"📦 [IMAGE GEN] Received chunk {chunk_count}")
+                    print(f"[IMAGE GEN] Received chunk {chunk_count}")
 
                     if chunk.candidates is None or chunk.candidates[0].content is None or chunk.candidates[0].content.parts is None:
-                        print(f"⚠️ [IMAGE GEN] Chunk {chunk_count} has no content, skipping")
+                        print(f"[IMAGE GEN] Chunk {chunk_count} has no content, skipping")
                         continue
 
                     # Check for image data
                     part = chunk.candidates[0].content.parts[0]
                     if part.inline_data and part.inline_data.data:
-                        print(f"🎉 [IMAGE GEN] Found image data in chunk {chunk_count}!")
+                        print(f"[IMAGE GEN] Found image data in chunk {chunk_count}!")
                         return part.inline_data
                     else:
                         # Handle text response (if any)
                         if hasattr(chunk, "text") and chunk.text:
-                            print(f"💬 [IMAGE GEN] Text response: {chunk.text}")
+                            print(f"[IMAGE GEN] Text response: {chunk.text}")
                         else:
-                            print(f"🔍 [IMAGE GEN] Chunk {chunk_count} has no image or text data")
+                            print(f"[IMAGE GEN] Chunk {chunk_count} has no image or text data")
 
-                print(f"❌ [IMAGE GEN] No image data received for {event_name} after {chunk_count} chunks")
+                print(f"[IMAGE GEN] No image data received for {event_name} after {chunk_count} chunks")
                 return None
 
             # Run the synchronous generation in a thread pool
@@ -549,37 +661,37 @@ async def generate_event_image(user_id: str, event_name: str, event_description:
             if inline_data:
                 data_buffer = inline_data.data
                 file_extension = mimetypes.guess_extension(inline_data.mime_type) or ".png"
-                print(f"📊 [IMAGE GEN] Image data: {len(data_buffer)} bytes, type: {inline_data.mime_type}")
+                print(f"[IMAGE GEN] Image data: {len(data_buffer)} bytes, type: {inline_data.mime_type}")
 
                 # Create filename: {node-name}-{user-id}.png
                 safe_event_name = event_name.replace(" ", "-").replace("/", "-").lower()
                 image_filename = f"{safe_event_name}-{user_id}{file_extension}"
-                print(f"📁 [IMAGE GEN] Target filename: {image_filename}")
+                print(f"[IMAGE GEN] Target filename: {image_filename}")
 
                 # Upload to MinIO
                 try:
                     data_stream = io.BytesIO(data_buffer)
                     minio_client.put_object(node_bucket, image_filename, data_stream, length=len(data_buffer), content_type=inline_data.mime_type)
-                    print(f"✅ [IMAGE GEN] Image uploaded to MinIO: {node_bucket}/{image_filename}")
+                    print(f"[IMAGE GEN] Image uploaded to MinIO: {node_bucket}/{image_filename}")
 
                     # Generate permanent signed URL
                     signed_url = get_permanent_image_url(node_bucket, image_filename)
                     return image_filename, signed_url
                 except S3Error as e:
-                    print(f"❌ [IMAGE GEN] Error uploading image to MinIO: {e}")
+                    print(f"[IMAGE GEN] Error uploading image to MinIO: {e}")
                     return "", ""
             else:
-                print(f"❌ [IMAGE GEN] No image data received from Nano Banana for {event_name}")
+                print(f"[IMAGE GEN] No image data received from Nano Banana for {event_name}")
                 return "", ""
         else:
             if not GEMINI_API_KEY:
-                print("❌ [IMAGE GEN] No GEMINI_API_KEY found, skipping image generation")
+                print("[IMAGE GEN] No GEMINI_API_KEY found, skipping image generation")
             else:
-                print("❌ [IMAGE GEN] No user image data and GEMINI_API_KEY found")
+                print("[IMAGE GEN] No user image data and GEMINI_API_KEY found")
             return "", ""
 
     except Exception as e:
-        print(f"💥 [IMAGE GEN] Error generating image for event {event_name}: {e}")
+        print(f"[IMAGE GEN] Error generating image for event {event_name}: {e}")
         import traceback
 
         traceback.print_exc()

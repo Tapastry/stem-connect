@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 import random
@@ -205,8 +206,29 @@ async def add_node(request: AddNodeRequest):
         return_nodes = []
         links = []
 
+        # Convert links to dict format for time calculation
+        current_links = []
+        with db.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT source, target, "timeInMonths" FROM "stem-connect_link" WHERE "userId" = %s
+            """,
+                (request.user_id,),
+            )
+            current_links = [dict(row) for row in cursor.fetchall()]
+
         # Generate all nodes at once with ADK for diversity
-        ai_events = await adk.generate_life_events_with_adk(prior_nodes, request.prompt, request.node_type, request.time_in_months, request.positivity, request.num_nodes, request.user_id)
+        ai_events = await adk.generate_life_events_with_adk(
+            prior_nodes,
+            request.prompt,
+            request.node_type,
+            request.time_in_months,
+            request.positivity,
+            request.num_nodes,
+            request.user_id,
+            highlight_path=[node.id for node in prior_nodes],  # Convert to list of IDs
+            all_links=current_links,
+        )
 
         for i, ai_content in enumerate(ai_events):
             created_at = datetime.now()
@@ -417,6 +439,20 @@ async def delete_node(user_id: str, node_id: str):
 
             print(f"Deleting node {node_id} and {len(unreachable_nodes)} unreachable nodes: {unreachable_nodes}")
 
+            # Get image names for nodes to be deleted before deleting from database
+            node_images_to_delete = []
+            for node in nodes_to_delete:
+                cursor.execute(
+                    """
+                    SELECT "imageName" FROM "stem-connect_node" 
+                    WHERE id = %s AND "userId" = %s AND "imageName" IS NOT NULL AND "imageName" != ''
+                """,
+                    (node, user_id),
+                )
+                result = cursor.fetchone()
+                if result and result["imageName"]:
+                    node_images_to_delete.append(result["imageName"])
+
             # Delete all links involving any of the nodes to be deleted
             for node in nodes_to_delete:
                 cursor.execute(
@@ -439,8 +475,112 @@ async def delete_node(user_id: str, node_id: str):
 
             db.commit()
 
-            return {"deleted_node": node_id, "cascade_deleted": list(unreachable_nodes), "total_deleted": len(nodes_to_delete), "remaining_nodes": len(all_nodes) - len(nodes_to_delete)}
+            # Delete images from MinIO after successful database deletion
+            deleted_images = []
+            if node_images_to_delete:
+                print(f"Deleting {len(node_images_to_delete)} images from MinIO")
+                for image_name in node_images_to_delete:
+                    try:
+                        adk.minio_client.remove_object("node-images", image_name)
+                        deleted_images.append(image_name)
+                        print(f"Deleted image: {image_name}")
+                    except Exception as e:
+                        print(f"Failed to delete image {image_name}: {e}")
+
+            return {"deleted_node": node_id, "cascade_deleted": list(unreachable_nodes), "total_deleted": len(nodes_to_delete), "remaining_nodes": len(all_nodes) - len(nodes_to_delete), "deleted_images": deleted_images}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete node: {str(e)}")
+
+
+# Check if user image exists in MinIO
+@app.get("/api/user-image-exists/{user_id}")
+async def check_user_image_exists(user_id: str):
+    """Check if user has uploaded an image to MinIO."""
+    try:
+        print(f"Checking user image for: {user_id}")
+
+        # Check if user-images bucket exists
+        bucket_name = "user-images"
+        try:
+            bucket_exists = adk.minio_client.bucket_exists(bucket_name)
+            print(f"Bucket '{bucket_name}' exists: {bucket_exists}")
+        except Exception as e:
+            print(f"Error checking bucket: {e}")
+            return {"exists": False, "message": f"Error checking bucket: {str(e)}"}
+
+        if not bucket_exists:
+            return {"exists": False, "message": "User images bucket does not exist"}
+
+        # Check if user's image exists
+        user_image_name = f"{user_id}.png"
+        print(f"Looking for image: {user_image_name}")
+
+        try:
+            stat = adk.minio_client.stat_object(bucket_name, user_image_name)
+            print(f"Found image: {user_image_name}, size: {stat.size}")
+            return {"exists": True, "image_name": user_image_name}
+        except Exception as e:
+            print(f"Image not found: {e}")
+            return {"exists": False, "message": f"No image found for user {user_id}"}
+
+    except Exception as e:
+        print(f"Error in check_user_image_exists: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check user image: {str(e)}")
+
+
+# Upload user image to MinIO
+@app.post("/api/upload-user-image/{user_id}")
+async def upload_user_image(user_id: str, request: Request):
+    """Upload and store user image in MinIO with proper naming."""
+    try:
+        # Get the uploaded file data
+        form_data = await request.form()
+        uploaded_file = form_data.get("image")
+
+        if not uploaded_file:
+            raise HTTPException(status_code=400, detail="No image file provided")
+
+        # Read the file data
+        file_data = await uploaded_file.read()
+
+        # Ensure user-images bucket exists
+        bucket_name = "user-images"
+        try:
+            if not adk.minio_client.bucket_exists(bucket_name):
+                print(f"Creating bucket: {bucket_name}")
+                adk.minio_client.make_bucket(bucket_name)
+                print(f"Bucket created: {bucket_name}")
+            else:
+                print(f"Bucket exists: {bucket_name}")
+        except Exception as e:
+            print(f"Error with bucket '{bucket_name}': {e}")
+            raise HTTPException(status_code=500, detail=f"MinIO bucket error: {str(e)}")
+
+        # Upload with standardized name
+        user_image_name = f"{user_id}.png"
+
+        try:
+            print(f"Uploading image: {user_image_name} ({len(file_data)} bytes)")
+
+            # Check if image already exists and remove it first to ensure overwrite
+            try:
+                adk.minio_client.stat_object(bucket_name, user_image_name)
+                print(f"Removing existing image: {user_image_name}")
+                adk.minio_client.remove_object(bucket_name, user_image_name)
+            except:
+                print(f"No existing image to remove: {user_image_name}")
+
+            data_stream = io.BytesIO(file_data)
+            adk.minio_client.put_object(bucket_name, user_image_name, data_stream, length=len(file_data), content_type="image/png")
+
+            print(f"User image uploaded: {bucket_name}/{user_image_name}")
+            return {"success": True, "message": f"Image uploaded successfully as {user_image_name}", "image_name": user_image_name}
+
+        except Exception as e:
+            print(f"Upload failed for {user_image_name}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload to MinIO: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload user image: {str(e)}")
