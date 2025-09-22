@@ -807,16 +807,17 @@ async def agent_to_client_sse(live_events: AsyncGenerator) -> AsyncGenerator[str
         if part.text:
             cleaned_text = part.text
             completeness_suggested = False
-            print(f"[SSE DEBUG] Found text: '{cleaned_text[:50]}...' (length: {len(cleaned_text)})")
+            print(f"[SSE DEBUG] Found text: '{cleaned_text[:50]}...' (length: {len(cleaned_text)}) partial={getattr(event, 'partial', None)}")
 
             if completion_trigger in cleaned_text:
                 cleaned_text = cleaned_text.replace(completion_trigger, "").strip()
                 completeness_suggested = True
 
-            if cleaned_text:
+            # Only send text if it's a partial event (streaming chunk)
+            if cleaned_text and event.partial:
                 message = {"mime_type": "text/plain", "data": cleaned_text}
                 yield f"data: {json.dumps(message)}\n\n"
-                print(f"[AGENT TO CLIENT]: text/plain: {message}")
+                print(f"[AGENT TO CLIENT]: text/plain (partial): {message}")
 
             if completeness_suggested:
                 yield f"data: {json.dumps({'completeness_suggested': True})}\n\n"
