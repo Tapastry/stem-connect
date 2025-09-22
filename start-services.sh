@@ -6,8 +6,16 @@ cd /app/backend
 ./start_api.sh &
 BACKEND_PID=$!
 
-# Wait a moment for backend to start
-sleep 5
+# Wait for backend to be fully ready
+echo "Waiting for backend to be ready..."
+sleep 10
+
+# Check if backend is responding
+until curl -f http://127.0.0.1:8000/docs > /dev/null 2>&1; do
+    echo "Backend not ready yet, waiting 2 more seconds..."
+    sleep 2
+done
+echo "Backend is ready!"
 
 # Start the frontend server
 echo "Starting frontend server..."

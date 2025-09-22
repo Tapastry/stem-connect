@@ -64,6 +64,9 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
+# Override BACKEND_URL for container runtime to use local backend (IPv4)
+ENV BACKEND_URL=http://127.0.0.1:8000
+
 # Create Python virtual environment
 RUN python -m venv venv
 
